@@ -8,7 +8,7 @@ import TabBarBackground from '@/components/ui/TabBarBackground';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 
-export default function TabLayout() {
+export default function BusinessTabLayout() {
   const colorScheme = useColorScheme();
 
   return (
@@ -29,21 +29,21 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
-          tabBarIcon: ({ color }) => <Ionicons name="home" size={24} color={color} />,
+          title: 'Dashboard',
+          tabBarIcon: ({ color }) => <Ionicons name="grid" size={24} color={color} />,
         }}
       />
       <Tabs.Screen
-        name="explore"
+        name="stations"
         options={{
-          title: 'Find Stations',
-          tabBarIcon: ({ color }) => <Ionicons name="search" size={24} color={color} />,
+          title: 'Stations',
+          tabBarIcon: ({ color }) => <Ionicons name="business" size={24} color={color} />,
         }}
       />
       <Tabs.Screen
-        name="charging"
+        name="sessions"
         options={{
-          title: 'Charging',
+          title: 'Sessions',
           tabBarIcon: ({ color }) => <Ionicons name="flash" size={24} color={color} />,
         }}
       />
