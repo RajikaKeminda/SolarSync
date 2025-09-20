@@ -1,18 +1,18 @@
 import {
-    AITripSuggestion,
-    Analytics,
-    ChargingSession,
-    ChargingStation,
-    Location,
-    Reservation,
-    Review,
-    TripPlan,
-    User,
-    Vehicle
+  AITripSuggestion,
+  Analytics,
+  ChargingSession,
+  ChargingStation,
+  Location,
+  Reservation,
+  Review,
+  TripPlan,
+  User,
+  Vehicle
 } from '../types';
 
 // Base API configuration
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://wealthy-doberman-newly.ngrok-free.app';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -81,9 +81,8 @@ class ApiService {
 
   // Authentication APIs
   async login(email: string, password: string): Promise<ApiResponse<{ user: User; token: string }>> {
-    return this.request('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
+    return this.request(`/users/email/${email}`, {
+      method: 'GET',
     });
   }
 
@@ -96,9 +95,9 @@ class ApiService {
     phoneNumber?: string;
     businessName?: string;
   }): Promise<ApiResponse<{ user: User; token: string }>> {
-    return this.request('/auth/register', {
+    return this.request('/users', {
       method: 'POST',
-      body: JSON.stringify(userData),
+      body: JSON.stringify({...userData, phone: userData.phoneNumber}),
     });
   }
 

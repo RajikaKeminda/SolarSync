@@ -3,21 +3,23 @@ import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
 import {
-    Alert,
-    Image,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useClerk } from '@clerk/clerk-expo';
 import { apiService } from '../../services/api';
 import { useAuthStore, useVehicleStore } from '../../store';
 
 export default function ProfileScreen() {
+  const { signOut } = useClerk()  ;
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user, logout } = useAuthStore();
@@ -37,6 +39,7 @@ export default function ProfileScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
+              await signOut();
               await apiService.logout();
               apiService.clearToken();
               await logout();

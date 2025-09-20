@@ -1,23 +1,26 @@
+import { useSignUp } from '@clerk/clerk-expo';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
 import {
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { apiService } from '../../services/api';
 import { useAuthStore } from '../../store';
-import { isValidEmail, isValidPhoneNumber } from '../../utils/helpers';
+import { isValidEmail } from '../../utils/helpers';
 
 export default function RegisterScreen() {
+
+  const { signUp, setActive } = useSignUp()
   const router = useRouter();
   const setAuth = useAuthStore((state) => state.setAuth);
   
@@ -45,10 +48,11 @@ export default function RegisterScreen() {
       return false;
     }
 
-    if (phoneNumber && !isValidPhoneNumber(phoneNumber)) {
-      Alert.alert('Error', 'Please enter a valid phone number');
-      return false;
-    }
+    // && !isValidPhoneNumber(phoneNumber)
+    // if (phoneNumber) {
+    //   Alert.alert('Error', 'Please enter a valid phone number');
+    //   return false;
+    // }
 
     if (password.length < 8) {
       Alert.alert('Error', 'Password must be at least 8 characters long');
@@ -89,12 +93,21 @@ export default function RegisterScreen() {
         businessName: userType === 'station_owner' ? businessName.trim() : undefined,
       };
 
+      if (!signUp) {
+        Alert.alert('Error', 'Failed to create account');
+        return;
+      }
+
+      const { createdSessionId } = await signUp.create({ emailAddress: email, password, username: firstName,  })
+      
+      await setActive({ session: createdSessionId })
+      
       const response = await apiService.register(userData);
       
       if (response.success && response.data) {
-        const { user, token } = response.data;
-        apiService.setToken(token);
-        setAuth(user, token);
+        const user: any = response.data;
+        apiService.setToken(createdSessionId || '');
+        setAuth(user, createdSessionId || '');
         
         Alert.alert(
           'Success',
