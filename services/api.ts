@@ -180,6 +180,10 @@ class ApiService {
     return this.request(`/stations/nearby?${params}`);
   }
 
+  async getStationsByOwnerId(ownerId: string): Promise<ApiResponse<ChargingStation[]>> {
+    return this.request(`/stations/owner/${ownerId}`);
+  }
+
   async getStationById(id: string): Promise<ApiResponse<ChargingStation>> {
     return this.request(`/stations/${id}`);
   }

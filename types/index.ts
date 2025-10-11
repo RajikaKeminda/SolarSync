@@ -58,6 +58,8 @@ export interface ChargingStation {
   averageRating: number;
   totalReviews: number;
   images: string[];
+  contactEmail?: string;
+  contactPhone?: string;
   createdAt: Date;
   updatedAt: Date;
 }
