@@ -1,119 +1,136 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-    Alert,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { apiService } from '../../services/api';
+import { useAuthStore } from '../../store';
+import { ChargingStation } from '../../types';
 import { formatPrice } from '../../utils/helpers';
 
 export default function StationsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user } = useAuthStore();
   
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [stations, setStations] = useState<ChargingStation[]>([]);
 
-  const onRefresh = React.useCallback(() => {
-    setRefreshing(true);
-    // TODO: Fetch latest station data
-    setTimeout(() => setRefreshing(false), 2000);
-  }, []);
+  const fetchStations = useCallback(async () => {
+    if (!user?.id) return;
 
-  // Mock station data
-  const mockStations = [
-    {
-      id: '1',
-      name: 'PowerStation Downtown',
-      address: '123 Main St, Downtown',
-      totalPorts: 8,
-      availablePorts: 3,
-      activeSessions: 5,
-      status: 'online',
-      revenue24h: 156.75,
-      totalRevenue: 12456.90,
-      portTypes: [
-        { type: 'CCS2', count: 4, maxPower: 150 },
-        { type: 'Type2', count: 4, maxPower: 22 }
-      ]
-    },
-    {
-      id: '2',
-      name: 'GreenCharge Mall',
-      address: '456 Shopping Center',
-      totalPorts: 12,
-      availablePorts: 8,
-      activeSessions: 4,
-      status: 'online',
-      revenue24h: 203.40,
-      totalRevenue: 8932.15,
-      portTypes: [
-        { type: 'CCS2', count: 6, maxPower: 150 },
-        { type: 'CHAdeMO', count: 2, maxPower: 50 },
-        { type: 'Type2', count: 4, maxPower: 22 }
-      ]
-    },
-    {
-      id: '3',
-      name: 'FastCharge Highway',
-      address: 'Highway 101, Exit 45',
-      totalPorts: 6,
-      availablePorts: 0,
-      activeSessions: 0,
-      status: 'maintenance',
-      revenue24h: 0,
-      totalRevenue: 15678.30,
-      portTypes: [
-        { type: 'CCS2', count: 4, maxPower: 350 },
-        { type: 'CHAdeMO', count: 2, maxPower: 90 }
-      ]
+    try {
+      const response = await apiService.getStationsByOwnerId(user.id);
+      if (response.success && response.data) {
+        setStations(response.data);
+      } else {
+        Alert.alert('Error', response.error || 'Failed to fetch stations');
+      }
+    } catch (error) {
+      console.error('Error fetching stations:', error);
+      Alert.alert('Error', 'Failed to fetch stations. Please try again.');
+    } finally {
+      setLoading(false);
     }
-  ];
+  }, [user?.id]);
+
+  useEffect(() => {
+    fetchStations();
+  }, [fetchStations]);
+
+  // Refresh stations when screen comes into focus (e.g., after adding a new station)
+  useFocusEffect(
+    useCallback(() => {
+      fetchStations();
+    }, [fetchStations])
+  );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchStations();
+    setRefreshing(false);
+  }, [fetchStations]);
+
 
   const handleAddStation = () => {
     router.push('/business/station/add');
   };
 
   const handleStationPress = (stationId: string) => {
-    router.push(`/business/station/details?id=${stationId}`);
+    // TODO: Navigate to station details when route is implemented
+    Alert.alert('Coming Soon', 'Station details view will be available in the next update');
   };
 
-  const handleToggleStatus = (stationId: string, currentStatus: string) => {
-    const newStatus = currentStatus === 'online' ? 'offline' : 'online';
+  const handleToggleStatus = async (stationId: string, currentStatus: boolean) => {
+    const newStatus = !currentStatus;
+    const statusText = newStatus ? 'online' : 'offline';
+    
     Alert.alert(
       'Change Station Status',
-      `Set station ${newStatus}?`,
+      `Set station ${statusText}?`,
       [
         { text: 'Cancel' },
-        { text: 'Confirm', onPress: () => console.log(`Station ${stationId} set to ${newStatus}`) }
+        { 
+          text: 'Confirm', 
+          onPress: async () => {
+            try {
+              const response = await apiService.updateStation(stationId, { isActive: newStatus });
+              if (response.success) {
+                // Update local state
+                setStations(prevStations => 
+                  prevStations.map(station => 
+                    station.id === stationId 
+                      ? { ...station, isActive: newStatus }
+                      : station
+                  )
+                );
+                Alert.alert('Success', `Station set ${statusText} successfully`);
+              } else {
+                Alert.alert('Error', response.error || 'Failed to update station status');
+              }
+            } catch (error) {
+              console.error('Error updating station status:', error);
+              Alert.alert('Error', 'Failed to update station status. Please try again.');
+            }
+          }
+        }
       ]
     );
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'online': return '#4CAF50';
-      case 'offline': return '#9E9E9E';
-      case 'maintenance': return '#FF9800';
-      default: return '#F44336';
-    }
+  const getStatusColor = (isActive: boolean) => {
+    return isActive ? '#4CAF50' : '#9E9E9E';
   };
 
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case 'online': return 'Online';
-      case 'offline': return 'Offline';
-      case 'maintenance': return 'Maintenance';
-      default: return 'Error';
-    }
+  const getStatusText = (isActive: boolean) => {
+    return isActive ? 'Online' : 'Offline';
   };
+
+  // Calculate statistics from real station data
+  const calculateStats = () => {
+    const totalStations = stations.length;
+    const activeSessions = 0; // This would come from sessions API
+    const todayRevenue = 0; // This would come from analytics API
+    
+    return {
+      totalStations,
+      activeSessions,
+      todayRevenue
+    };
+  };
+
+  const stats = calculateStats();
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -140,22 +157,20 @@ export default function StationsScreen() {
         {/* Summary Cards */}
         <View style={styles.summaryContainer}>
           <View style={styles.summaryCard}>
-            <Text style={styles.summaryValue}>{mockStations.length}</Text>
+            <Text style={styles.summaryValue}>{stats.totalStations}</Text>
             <Text style={styles.summaryLabel}>Total Stations</Text>
           </View>
           
           <View style={styles.summaryCard}>
-            <Text style={styles.summaryValue}>
-              {mockStations.reduce((sum, station) => sum + station.activeSessions, 0)}
-            </Text>
+            <Text style={styles.summaryValue}>{stats.activeSessions}</Text>
             <Text style={styles.summaryLabel}>Active Sessions</Text>
           </View>
           
           <View style={styles.summaryCard}>
             <Text style={styles.summaryValue}>
-              {formatPrice(mockStations.reduce((sum, station) => sum + station.revenue24h, 0))}
+              {formatPrice(stats.todayRevenue)}
             </Text>
-            <Text style={styles.summaryLabel}>Today's Revenue</Text>
+            <Text style={styles.summaryLabel}>Today&apos;s Revenue</Text>
           </View>
         </View>
 
@@ -163,92 +178,112 @@ export default function StationsScreen() {
         <View style={styles.stationsContainer}>
           <Text style={styles.sectionTitle}>Station Management</Text>
           
-          {mockStations.map((station) => (
-            <TouchableOpacity
-              key={station.id}
-              style={styles.stationCard}
-              onPress={() => handleStationPress(station.id)}
-            >
-              <View style={styles.stationHeader}>
-                <View style={styles.stationInfo}>
-                  <Text style={styles.stationName}>{station.name}</Text>
-                  <Text style={styles.stationAddress}>{station.address}</Text>
-                </View>
-                
-                <View style={styles.stationStatus}>
-                  <View style={[
-                    styles.statusDot,
-                    { backgroundColor: getStatusColor(station.status) }
-                  ]} />
-                  <Text style={[
-                    styles.statusText,
-                    { color: getStatusColor(station.status) }
-                  ]}>
-                    {getStatusText(station.status)}
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.stationStats}>
-                <View style={styles.statItem}>
-                  <Text style={styles.statValue}>
-                    {station.availablePorts}/{station.totalPorts}
-                  </Text>
-                  <Text style={styles.statLabel}>Available Ports</Text>
-                </View>
-                
-                <View style={styles.statItem}>
-                  <Text style={styles.statValue}>{station.activeSessions}</Text>
-                  <Text style={styles.statLabel}>Active Sessions</Text>
-                </View>
-                
-                <View style={styles.statItem}>
-                  <Text style={styles.statValue}>
-                    {formatPrice(station.revenue24h)}
-                  </Text>
-                  <Text style={styles.statLabel}>24h Revenue</Text>
-                </View>
-              </View>
-
-              <View style={styles.stationActions}>
-                <TouchableOpacity 
-                  style={styles.actionButton}
-                  onPress={() => router.push(`/business/station/edit?id=${station.id}`)}
-                >
-                  <Ionicons name="settings" size={16} color="#007AFF" />
-                  <Text style={styles.actionButtonText}>Settings</Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity 
-                  style={styles.actionButton}
-                  onPress={() => handleToggleStatus(station.id, station.status)}
-                >
-                  <Ionicons 
-                    name={station.status === 'online' ? 'pause' : 'play'} 
-                    size={16} 
-                    color={station.status === 'online' ? '#FF9800' : '#4CAF50'} 
-                  />
-                  <Text style={[
-                    styles.actionButtonText,
-                    { color: station.status === 'online' ? '#FF9800' : '#4CAF50' }
-                  ]}>
-                    {station.status === 'online' ? 'Pause' : 'Resume'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Port Types */}
-              <View style={styles.portTypes}>
-                {station.portTypes.map((port, index) => (
-                  <View key={index} style={styles.portType}>
-                    <Text style={styles.portTypeText}>
-                      {port.count}x {port.type} ({port.maxPower}kW)
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <Text style={styles.loadingText}>Loading stations...</Text>
+            </View>
+          ) : stations.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="business" size={48} color="#ccc" />
+              <Text style={styles.emptyTitle}>No Stations Yet</Text>
+              <Text style={styles.emptyText}>
+                Add your first charging station to get started
+              </Text>
+              <TouchableOpacity 
+                style={styles.emptyButton}
+                onPress={handleAddStation}
+              >
+                <Text style={styles.emptyButtonText}>Add Station</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            stations.map((station) => (
+              <TouchableOpacity
+                key={station.id}
+                style={styles.stationCard}
+                onPress={() => handleStationPress(station.id)}
+              >
+                <View style={styles.stationHeader}>
+                  <View style={styles.stationInfo}>
+                    <Text style={styles.stationName}>{station.name}</Text>
+                    <Text style={styles.stationAddress}>{station.address}</Text>
+                  </View>
+                  
+                  <View style={styles.stationStatus}>
+                    <View style={[
+                      styles.statusDot,
+                      { backgroundColor: getStatusColor(station.isActive) }
+                    ]} />
+                    <Text style={[
+                      styles.statusText,
+                      { color: getStatusColor(station.isActive) }
+                    ]}>
+                      {getStatusText(station.isActive)}
                     </Text>
                   </View>
-                ))}
-              </View>
-            </TouchableOpacity>
-          ))}
+                </View>
+
+                <View style={styles.stationStats}>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statValue}>
+                      {station.availablePorts}/{station.totalPorts}
+                    </Text>
+                    <Text style={styles.statLabel}>Available Ports</Text>
+                  </View>
+                  
+                  <View style={styles.statItem}>
+                    <Text style={styles.statValue}>0</Text>
+                    <Text style={styles.statLabel}>Active Sessions</Text>
+                  </View>
+                  
+                  <View style={styles.statItem}>
+                    <Text style={styles.statValue}>
+                      {formatPrice(0)}
+                    </Text>
+                    <Text style={styles.statLabel}>24h Revenue</Text>
+                  </View>
+                </View>
+
+                <View style={styles.stationActions}>
+                  <TouchableOpacity 
+                    style={styles.actionButton}
+                    onPress={() => router.push(`/business/station/edit?id=${station.id}`)}
+                  >
+                    <Ionicons name="settings" size={16} color="#007AFF" />
+                    <Text style={styles.actionButtonText}>Settings</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity 
+                    style={styles.actionButton}
+                    onPress={() => handleToggleStatus(station.id, station.isActive)}
+                  >
+                    <Ionicons 
+                      name={station.isActive ? 'pause' : 'play'} 
+                      size={16} 
+                      color={station.isActive ? '#FF9800' : '#4CAF50'} 
+                    />
+                    <Text style={[
+                      styles.actionButtonText,
+                      { color: station.isActive ? '#FF9800' : '#4CAF50' }
+                    ]}>
+                      {station.isActive ? 'Pause' : 'Resume'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Port Types */}
+                <View style={styles.portTypes}>
+                  {station.portTypes.map((port, index) => (
+                    <View key={index} style={styles.portType}>
+                      <Text style={styles.portTypeText}>
+                        {port.count}x {port.type} ({port.maxPower}kW)
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              </TouchableOpacity>
+            ))
+          )}
         </View>
 
         <View style={{ height: 100 }} />
@@ -434,5 +469,44 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#007AFF',
     fontWeight: '500',
+  },
+  loadingContainer: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#666',
+  },
+  emptyContainer: {
+    padding: 40,
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    marginVertical: 20,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  emptyButton: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  emptyButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
