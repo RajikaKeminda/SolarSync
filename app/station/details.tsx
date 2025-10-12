@@ -76,7 +76,7 @@ export default function StationDetailsScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams();
   const { addToFavorites, removeFromFavorites, favoriteStations } = useStationStore();
-  const { selectedVehicle } = useVehicleStore();
+  const { selectedVehicle, vehicles } = useVehicleStore();
 
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [station, setStation] = useState<ChargingStation | null>(null);
@@ -188,27 +188,6 @@ export default function StationDetailsScreen() {
   };
 
   const handleBook = () => {
-    if (!selectedVehicle) {
-      Alert.alert(
-        'Add Vehicle',
-        'Please add a vehicle to your profile before booking a charging session.',
-        [
-          { text: 'Cancel' },
-          { text: 'Add Vehicle', onPress: () => router.push('/vehicle/add') }
-        ]
-      );
-      return;
-    }
-
-    if (!isCompatible) {
-      Alert.alert(
-        'Incompatible Vehicle',
-        'Your vehicle is not compatible with the available charging ports at this station.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
     router.push(`/station/book?stationId=${station.id}`);
   };
 

@@ -252,6 +252,14 @@ class ApiService {
     return this.request('/reservations');
   }
 
+  async getReservationsByUserId(userId: string): Promise<ApiResponse<Reservation[]>> {
+    return this.request(`/reservations/user/${userId}`);
+  }
+
+  async getReservationsByStationId(stationId: string): Promise<ApiResponse<Reservation[]>> {
+    return this.request(`/reservations/station/${stationId}`);
+  }
+
   async createReservation(data: {
     stationId: string;
     vehicleId: string;
