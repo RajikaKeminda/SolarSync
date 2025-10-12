@@ -188,19 +188,13 @@ class ApiService {
     return this.request(`/stations/${id}`);
   }
 
-  async searchStations(query: {
-    search?: string;
-    location?: Location;
-    portTypes?: string[];
-    amenities?: string[];
-    maxDistance?: number;
-    priceRange?: { min: number; max: number };
-    rating?: number;
-  }): Promise<ApiResponse<ChargingStation[]>> {
-    return this.request('/stations/search', {
-      method: 'POST',
-      body: JSON.stringify(query),
-    });
+
+  async getAllStations(): Promise<ApiResponse<ChargingStation[]>> {
+    return this.request('/stations');
+  }
+
+  async searchStations(query: string): Promise<ApiResponse<ChargingStation[]>> {
+    return this.request(`/stations/search?q=${query}`);
   }
 
   async addStation(station: Omit<ChargingStation, 'id' | 'ownerId' | 'createdAt' | 'updatedAt'>): Promise<ApiResponse<ChargingStation>> {
