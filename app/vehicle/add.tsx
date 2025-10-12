@@ -3,26 +3,27 @@ import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
 import {
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useVehicleStore } from '../../store';
+import { apiService } from '../../services/api';
+import { useAuthStore, useVehicleStore } from '../../store';
 import { ChargingPortType, Vehicle } from '../../types';
 import { CHARGING_PORT_TYPES, POPULAR_EV_MODELS } from '../../utils/constants';
-import { generateId } from '../../utils/helpers';
 
 export default function AddVehicleScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user } = useAuthStore();
   const { addVehicle, vehicles } = useVehicleStore();
   
   const [make, setMake] = useState('');
@@ -33,6 +34,7 @@ export default function AddVehicleScreen() {
   const [currentBatteryLevel, setCurrentBatteryLevel] = useState('85');
   const [selectedPortTypes, setSelectedPortTypes] = useState<ChargingPortType[]>([]);
   const [isDefault, setIsDefault] = useState(vehicles.length === 0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handlePortTypeToggle = (portType: ChargingPortType) => {
     if (selectedPortTypes.includes(portType)) {
@@ -47,7 +49,12 @@ export default function AddVehicleScreen() {
     setModel(''); // Reset model when make changes
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (!user) {
+      Alert.alert('Authentication Required', 'Please log in to add a vehicle');
+      return;
+    }
+
     // Validation
     if (!make.trim() || !model.trim() || !year.trim()) {
       Alert.alert('Missing Information', 'Please fill in make, model, and year');
@@ -88,32 +95,54 @@ export default function AddVehicleScreen() {
       return;
     }
 
-    const newVehicle: Vehicle = {
-      id: generateId(),
-      ownerId: 'current-user',
-      make: make.trim(),
-      model: model.trim(),
-      year: yearNum,
-      batteryCapacity: capacityNum,
-      chargingPortType: selectedPortTypes,
-      estimatedRange: rangeNum,
-      currentBatteryLevel: batteryLevelNum,
-      isDefault,
-      createdAt: new Date()
-    };
+    setIsSubmitting(true);
 
-    addVehicle(newVehicle);
+    try {
+      // Create vehicle data for API (excluding fields that will be set by the API)
+      const vehicleData: Omit<Vehicle, 'id' | 'createdAt'> = {
+        make: make.trim(),
+        model: model.trim(),
+        year: yearNum,
+        batteryCapacity: capacityNum,
+        chargingPortType: selectedPortTypes,
+        estimatedRange: rangeNum,
+        currentBatteryLevel: batteryLevelNum,
+        isDefault,
+        ownerId: user.id,
+      };
 
-    Alert.alert(
-      'Vehicle Added',
-      `${make} ${model} has been added to your profile.`,
-      [
-        {
-          text: 'OK',
-          onPress: () => router.back()
-        }
-      ]
-    );
+      console.log('Creating new vehicle:', vehicleData);
+
+      // Submit to API
+      const response = await apiService.addVehicle(vehicleData);
+
+      if (response.success && response.data) {
+        // Add to local store
+        addVehicle(response.data);
+
+        Alert.alert(
+          'Vehicle Added',
+          `${make} ${model} has been successfully added to your profile.`,
+          [
+            {
+              text: 'OK',
+              onPress: () => router.back()
+            }
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Error',
+          response.error || 'Failed to add vehicle. Please try again.'
+        );
+      }
+
+    } catch (error) {
+      console.error('Error adding vehicle:', error);
+      Alert.alert('Error', 'An unexpected error occurred. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -129,8 +158,14 @@ export default function AddVehicleScreen() {
           <Ionicons name="close" size={24} color="#333" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Add Vehicle</Text>
-        <TouchableOpacity onPress={handleSave}>
-          <Text style={styles.saveButton}>Save</Text>
+        <TouchableOpacity 
+          onPress={handleSave}
+          disabled={isSubmitting}
+          style={isSubmitting ? styles.disabledSaveButton : undefined}
+        >
+          <Text style={[styles.saveButton, isSubmitting && styles.disabledSaveButtonText]}>
+            {isSubmitting ? 'Saving...' : 'Save'}
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -543,5 +578,11 @@ const styles = StyleSheet.create({
   checkedCheckbox: {
     backgroundColor: '#007AFF',
     borderColor: '#007AFF',
+  },
+  disabledSaveButton: {
+    opacity: 0.5,
+  },
+  disabledSaveButtonText: {
+    color: '#999',
   },
 });
