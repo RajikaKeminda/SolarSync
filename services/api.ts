@@ -280,7 +280,7 @@ class ApiService {
 
   // Review APIs
   async getStationReviews(stationId: string): Promise<ApiResponse<Review[]>> {
-    return this.request(`/stations/${stationId}/reviews`);
+    return this.request(`/reviews/station/${stationId}`);
   }
 
   async addReview(review: {

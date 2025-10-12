@@ -1,87 +1,179 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-    Alert,
-    Dimensions,
-    Image,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  Dimensions,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { apiService } from '../../services/api';
 import { useStationStore, useVehicleStore } from '../../store';
 import { ChargingStation } from '../../types';
 import { STATION_AMENITIES } from '../../utils/constants';
 import {
-    calculateChargingCost,
-    calculateChargingTime,
-    formatPrice,
-    formatTime12Hour,
-    getMaxChargingPower,
-    getStationStatus,
-    isVehicleCompatible
+  calculateChargingCost,
+  calculateChargingTime,
+  formatPrice,
+  formatTime12Hour,
+  getMaxChargingPower,
+  getStationStatus,
+  isVehicleCompatible
 } from '../../utils/helpers';
 
 const { width, height } = Dimensions.get('window');
 
+// Mock station data (fallback)
+const createMockStation = (id: string): ChargingStation => ({
+  id: id || '1',
+  ownerId: 'owner1',
+  name: 'PowerStation Downtown',
+  description: 'Fast charging in the heart of the city with premium amenities. Perfect for urban charging needs.',
+  address: '123 Main St, Downtown, City 12345',
+  latitude: 37.7849,
+  longitude: -122.4094,
+  totalPorts: 8,
+  availablePorts: 3,
+  portTypes: [
+    { type: 'CCS2', count: 4, maxPower: 150, available: 2 },
+    { type: 'Type2', count: 4, maxPower: 22, available: 1 }
+  ],
+  pricing: {
+    baseRate: 0.35,
+    peakRate: 0.45,
+    offPeakRate: 0.28,
+    currency: 'USD'
+  },
+  amenities: ['restroom', 'wifi', 'restaurant', 'shopping', 'parking', 'security'],
+  operatingHours: {
+    monday: { isOpen: true, is24Hours: true },
+    tuesday: { isOpen: true, is24Hours: true },
+    wednesday: { isOpen: true, is24Hours: true },
+    thursday: { isOpen: true, is24Hours: true },
+    friday: { isOpen: true, is24Hours: true },
+    saturday: { isOpen: true, is24Hours: true },
+    sunday: { isOpen: true, is24Hours: true }
+  },
+  isActive: true,
+  averageRating: 4.5,
+  totalReviews: 128,
+  images: [
+    'https://via.placeholder.com/400x200/007AFF/FFFFFF?text=Station+1',
+    'https://via.placeholder.com/400x200/4CAF50/FFFFFF?text=Station+2',
+    'https://via.placeholder.com/400x200/FF9800/FFFFFF?text=Station+3',
+  ],
+  createdAt: new Date(),
+  updatedAt: new Date()
+});
+
 export default function StationDetailsScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams();
   const { addToFavorites, removeFromFavorites, favoriteStations } = useStationStore();
   const { selectedVehicle } = useVehicleStore();
-  
+
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const [station, setStation] = useState<ChargingStation | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Mock station data - in real app this would come from API
-  const mockStation: ChargingStation = {
-    id: id as string || '1',
-    ownerId: 'owner1',
-    name: 'PowerStation Downtown',
-    description: 'Fast charging in the heart of the city with premium amenities. Perfect for urban charging needs.',
-    address: '123 Main St, Downtown, City 12345',
-    latitude: 37.7849,
-    longitude: -122.4094,
-    totalPorts: 8,
-    availablePorts: 3,
-    portTypes: [
-      { type: 'CCS2', count: 4, maxPower: 150, available: 2 },
-      { type: 'Type2', count: 4, maxPower: 22, available: 1 }
-    ],
-    pricing: { 
-      baseRate: 0.35, 
-      peakRate: 0.45,
-      offPeakRate: 0.28,
-      currency: 'USD' 
-    },
-    amenities: ['restroom', 'wifi', 'restaurant', 'shopping', 'parking', 'security'],
-    operatingHours: {
-      monday: { isOpen: true, is24Hours: true },
-      tuesday: { isOpen: true, is24Hours: true },
-      wednesday: { isOpen: true, is24Hours: true },
-      thursday: { isOpen: true, is24Hours: true },
-      friday: { isOpen: true, is24Hours: true },
-      saturday: { isOpen: true, is24Hours: true },
-      sunday: { isOpen: true, is24Hours: true }
-    },
-    isActive: true,
-    averageRating: 4.5,
-    totalReviews: 128,
-    images: [
-      'https://via.placeholder.com/400x200/007AFF/FFFFFF?text=Station+1',
-      'https://via.placeholder.com/400x200/4CAF50/FFFFFF?text=Station+2',
-      'https://via.placeholder.com/400x200/FF9800/FFFFFF?text=Station+3',
-    ],
-    createdAt: new Date(),
-    updatedAt: new Date()
-  };
+  // Fetch station data from API
+  const fetchStationDetails = useCallback(async () => {
+    if (!id || typeof id !== 'string') {
+      setError('Invalid station ID');
+      setLoading(false);
+      return;
+    }
 
-  const station = mockStation;
+    try {
+      setLoading(true);
+      setError(null);
+
+      const response = await apiService.getStationById(id);
+
+      if (response.success && response.data) {
+        setStation(response.data);
+      } else {
+        console.error('Failed to fetch station:', response.error);
+        // Fall back to mock data if API fails
+        setStation(createMockStation(id));
+        setError(response.error || 'Failed to load station details');
+      }
+    } catch (error) {
+      console.error('Error fetching station details:', error);
+      // Fall back to mock data if API fails
+      setStation(createMockStation(id));
+      setError('Failed to load station details. Showing demo data.');
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  // Load station data on mount
+  useEffect(() => {
+    fetchStationDetails();
+  }, [fetchStationDetails]);
+
+  // Early return for loading and error states
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.centerContent]}>
+        <StatusBar style="dark" />
+        <TouchableOpacity
+          style={styles.loadingBackButton}
+          onPress={() => router.back()}
+        >
+          <Ionicons name="arrow-back" size={24} color="#333" />
+        </TouchableOpacity>
+        <Text style={styles.loadingText}>Loading station details...</Text>
+      </View>
+    );
+  }
+
+  if (error && !station) {
+    return (
+      <View style={[styles.container, styles.centerContent]}>
+        <StatusBar style="dark" />
+        <TouchableOpacity
+          style={styles.loadingBackButton}
+          onPress={() => router.back()}
+        >
+          <Ionicons name="arrow-back" size={24} color="#333" />
+        </TouchableOpacity>
+        <Ionicons name="warning" size={48} color="#FF9800" />
+        <Text style={styles.errorTitle}>Station Not Found</Text>
+        <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity
+          style={styles.retryButton}
+          onPress={fetchStationDetails}
+        >
+          <Text style={styles.retryButtonText}>Try Again</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (!station) {
+    return (
+      <View style={[styles.container, styles.centerContent]}>
+        <StatusBar style="dark" />
+        <TouchableOpacity
+          style={styles.loadingBackButton}
+          onPress={() => router.back()}
+        >
+          <Ionicons name="arrow-back" size={24} color="#333" />
+        </TouchableOpacity>
+        <Text style={styles.errorText}>Station data not available</Text>
+      </View>
+    );
+  }
+
   const isFavorite = favoriteStations.some(s => s.id === station.id);
   const status = getStationStatus(station);
   const isCompatible = selectedVehicle ? isVehicleCompatible(selectedVehicle, station) : true;
@@ -130,86 +222,109 @@ export default function StationDetailsScreen() {
   };
 
   const getAmenityInfo = (amenityId: string) => {
-    return STATION_AMENITIES.find(a => a.id === amenityId) || 
-           { id: amenityId, name: amenityId, icon: 'ellipse' };
+    return STATION_AMENITIES.find(a => a.id === amenityId) ||
+      { id: amenityId, name: amenityId, icon: 'ellipse' };
   };
 
-  const renderStationImages = () => (
-    <View style={styles.imageContainer}>
-      <ScrollView
-        horizontal
-        pagingEnabled
-        showsHorizontalScrollIndicator={false}
-        onScroll={(event) => {
-          const index = Math.round(event.nativeEvent.contentOffset.x / width);
-          setSelectedImageIndex(index);
-        }}
-        scrollEventThrottle={16}
-      >
-        {station.images.map((image, index) => (
-          <Image
-            key={index}
-            source={{ uri: image }}
-            style={styles.stationImage}
-            defaultSource={require('../../assets/images/icon.png')}
+  const renderStationImages = () => {
+    const images = station?.images && station.images.length > 0
+      ? station.images
+      : ['https://via.placeholder.com/400x200/007AFF/FFFFFF?text=No+Image'];
+
+    return (
+      <View style={styles.imageContainer}>
+        <ScrollView
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          onScroll={(event) => {
+            const index = Math.round(event.nativeEvent.contentOffset.x / width);
+            setSelectedImageIndex(index);
+          }}
+          scrollEventThrottle={16}
+        >
+          {images.map((image, index) => (
+            <Image
+              key={index}
+              source={{ uri: image }}
+              style={styles.stationImage}
+              defaultSource={require('../../assets/images/icon.png')}
+            />
+          ))}
+        </ScrollView>
+
+        {images.length > 1 && (
+          <View style={styles.imageIndicators}>
+            {images.map((_, index) => (
+              <View
+                key={index}
+                style={[
+                  styles.indicator,
+                  selectedImageIndex === index && styles.activeIndicator
+                ]}
+              />
+            ))}
+          </View>
+        )}
+
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+        >
+          <Ionicons name="arrow-back" size={24} color="#fff" />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.favoriteButton}
+          onPress={handleFavoriteToggle}
+        >
+          <Ionicons
+            name={isFavorite ? "heart" : "heart-outline"}
+            size={24}
+            color={isFavorite ? "#FF3B30" : "#fff"}
           />
-        ))}
-      </ScrollView>
-      
-      <View style={styles.imageIndicators}>
-        {station.images.map((_, index) => (
-          <View
-            key={index}
-            style={[
-              styles.indicator,
-              selectedImageIndex === index && styles.activeIndicator
-            ]}
-          />
-        ))}
+        </TouchableOpacity>
       </View>
-
-      <TouchableOpacity
-        style={styles.backButton}
-        onPress={() => router.back()}
-      >
-        <Ionicons name="arrow-back" size={24} color="#fff" />
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={styles.favoriteButton}
-        onPress={handleFavoriteToggle}
-      >
-        <Ionicons 
-          name={isFavorite ? "heart" : "heart-outline"} 
-          size={24} 
-          color={isFavorite ? "#FF3B30" : "#fff"} 
-        />
-      </TouchableOpacity>
-    </View>
-  );
+    );
+  };
 
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
-      
+
       {renderStationImages()}
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Error Banner */}
+        {error && station && (
+          <View style={styles.errorBanner}>
+            <Ionicons name="warning" size={16} color="#FF9800" />
+            <Text style={styles.errorBannerText}>{error}</Text>
+            <TouchableOpacity onPress={fetchStationDetails}>
+              <Ionicons name="refresh" size={16} color="#007AFF" />
+            </TouchableOpacity>
+          </View>
+        )}
         <View style={styles.header}>
           <View style={styles.titleSection}>
             <Text style={styles.stationName}>{station.name}</Text>
-            <View style={styles.ratingContainer}>
-              <Ionicons name="star" size={16} color="#FFB800" />
-              <Text style={styles.rating}>{station.averageRating}</Text>
-              <Text style={styles.reviewCount}>({station.totalReviews} reviews)</Text>
-            </View>
+            <TouchableOpacity onPress={() => router.push(`/station/reviews?id=${station.id}`)}>
+              <View style={styles.ratingContainer}>
+                <Ionicons name="star" size={16} color="#FFB800" />
+                <Text style={styles.rating}>{station.averageRating}</Text>
+                <Text style={styles.reviewCount}>({station.totalReviews} reviews)</Text>
+              </View>
+            </TouchableOpacity>
+
           </View>
 
           <View style={styles.statusContainer}>
             <View style={[
               styles.statusIndicator,
-              { backgroundColor: status.status === 'available' ? '#4CAF50' : 
-                                status.status === 'busy' ? '#FF9800' : '#F44336' }
+              {
+                backgroundColor: status.status === 'available' ? '#4CAF50' :
+                  status.status === 'busy' ? '#FF9800' : '#F44336'
+              }
             ]} />
             <Text style={styles.statusText}>{status.message}</Text>
           </View>
@@ -222,7 +337,7 @@ export default function StationDetailsScreen() {
           <View style={styles.incompatibleBanner}>
             <Ionicons name="warning" size={20} color="#FF9800" />
             <Text style={styles.incompatibleText}>
-              Your vehicle is not compatible with this station's charging ports
+              Your vehicle is not compatible with this station&apos;s charging ports
             </Text>
           </View>
         )}
@@ -230,7 +345,7 @@ export default function StationDetailsScreen() {
         {/* Charging Information */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Charging Information</Text>
-          
+
           <View style={styles.chargingInfo}>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Available Ports</Text>
@@ -238,21 +353,21 @@ export default function StationDetailsScreen() {
                 {station.availablePorts} of {station.totalPorts}
               </Text>
             </View>
-            
+
             {selectedVehicle && isCompatible && (
               <>
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Max Power for Your Vehicle</Text>
                   <Text style={styles.infoValue}>{maxPower} kW</Text>
                 </View>
-                
+
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Est. Charging Time (20-80%)</Text>
                   <Text style={styles.infoValue}>
                     {Math.round(calculateChargingTime(20, 80, selectedVehicle.batteryCapacity, maxPower))} min
                   </Text>
                 </View>
-                
+
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Est. Cost (20-80%)</Text>
                   <Text style={styles.infoValue}>
@@ -267,7 +382,7 @@ export default function StationDetailsScreen() {
         {/* Port Types */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Charging Ports</Text>
-          
+
           {station.portTypes.map((port, index) => (
             <View key={index} style={styles.portCard}>
               <View style={styles.portHeader}>
@@ -287,7 +402,7 @@ export default function StationDetailsScreen() {
         {/* Pricing */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Pricing</Text>
-          
+
           <View style={styles.pricingCard}>
             <View style={styles.priceRow}>
               <Text style={styles.priceLabel}>Standard Rate</Text>
@@ -295,7 +410,7 @@ export default function StationDetailsScreen() {
                 {formatPrice(station.pricing.baseRate)}/kWh
               </Text>
             </View>
-            
+
             {station.pricing.peakRate && (
               <View style={styles.priceRow}>
                 <Text style={styles.priceLabel}>Peak Hours (6 PM - 10 PM)</Text>
@@ -304,7 +419,7 @@ export default function StationDetailsScreen() {
                 </Text>
               </View>
             )}
-            
+
             {station.pricing.offPeakRate && (
               <View style={styles.priceRow}>
                 <Text style={styles.priceLabel}>Off-Peak (11 PM - 6 AM)</Text>
@@ -319,7 +434,7 @@ export default function StationDetailsScreen() {
         {/* Operating Hours */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Operating Hours</Text>
-          
+
           <View style={styles.hoursCard}>
             {Object.entries(station.operatingHours).map(([day, hours]) => (
               <View key={day} style={styles.hourRow}>
@@ -327,9 +442,9 @@ export default function StationDetailsScreen() {
                   {day.charAt(0).toUpperCase() + day.slice(1)}
                 </Text>
                 <Text style={styles.hoursText}>
-                  {hours.isOpen ? 
-                    (hours.is24Hours ? '24 Hours' : 
-                     `${formatTime12Hour(hours.openTime || '00:00')} - ${formatTime12Hour(hours.closeTime || '23:59')}`) : 
+                  {hours.isOpen ?
+                    (hours.is24Hours ? '24 Hours' :
+                      `${formatTime12Hour(hours.openTime || '00:00')} - ${formatTime12Hour(hours.closeTime || '23:59')}`) :
                     'Closed'
                   }
                 </Text>
@@ -341,7 +456,7 @@ export default function StationDetailsScreen() {
         {/* Amenities */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Amenities</Text>
-          
+
           <View style={styles.amenitiesGrid}>
             {station.amenities.map((amenityId, index) => {
               const amenity = getAmenityInfo(amenityId);
@@ -357,15 +472,15 @@ export default function StationDetailsScreen() {
 
         {/* Action Buttons */}
         <View style={styles.actionButtons}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.secondaryButton}
             onPress={handleGetDirections}
           >
             <Ionicons name="navigate" size={20} color="#007AFF" />
             <Text style={styles.secondaryButtonText}>Directions</Text>
           </TouchableOpacity>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.secondaryButton}
             onPress={handleCallStation}
           >
@@ -374,7 +489,7 @@ export default function StationDetailsScreen() {
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[
             styles.bookButton,
             (!isCompatible || status.status === 'full') && styles.disabledButton
@@ -686,5 +801,76 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  centerContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  loadingBackButton: {
+    position: 'absolute',
+    top: 60,
+    left: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F8F9FA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 20,
+  },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#333',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  errorText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  retryButton: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF8E1',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 16,
+    marginBottom: 8,
+    gap: 8,
+  },
+  errorBannerText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#FF9800',
+    fontWeight: '500',
   },
 });
