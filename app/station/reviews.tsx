@@ -1,18 +1,21 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-    Alert,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View
+  Alert,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { apiService } from '../../services/api';
+import { useAuthStore } from '../../store';
 import { Review } from '../../types';
 import { formatDateTime, getRelativeTime } from '../../utils/helpers';
 
@@ -20,12 +23,60 @@ export default function StationReviewsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { stationId } = useLocalSearchParams();
+  const { user } = useAuthStore();
   
   const [newReview, setNewReview] = useState('');
   const [newRating, setNewRating] = useState(0);
   const [showAddReview, setShowAddReview] = useState(false);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Mock reviews data
+  // Fetch reviews from API
+  const fetchReviews = useCallback(async () => {
+    if (!stationId || typeof stationId !== 'string') {
+      setError('Invalid station ID');
+      setLoading(false);
+      return;
+    }
+
+    try {
+      setError(null);
+      const response = await apiService.getStationReviews(stationId);
+      
+      if (response.success && response.data) {
+        setReviews(response.data);
+      } else {
+        console.error('Failed to fetch reviews:', response.error);
+        // Fall back to mock data if API fails
+        setReviews(mockReviews);
+        setError(response.error || 'Failed to load reviews');
+      }
+    } catch (error) {
+      console.error('Error fetching reviews:', error);
+      // Fall back to mock data if API fails
+      setReviews(mockReviews);
+      setError('Failed to load reviews. Showing demo data.');
+    } finally {
+      setLoading(false);
+    }
+  }, [stationId]);
+
+  // Load reviews on mount
+  useEffect(() => {
+    fetchReviews();
+  }, [fetchReviews]);
+
+  // Refresh reviews
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchReviews();
+    setRefreshing(false);
+  }, [fetchReviews]);
+
+  // Mock reviews data (fallback)
   const mockReviews: Review[] = [
     {
       id: '1',
@@ -73,10 +124,14 @@ export default function StationReviewsScreen() {
     }
   ];
 
-  const reviews = mockReviews;
-  const averageRating = reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length;
+  const averageRating = reviews.length > 0 ? reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length : 0;
 
-  const handleSubmitReview = () => {
+  const handleSubmitReview = async () => {
+    if (!user) {
+      Alert.alert('Login Required', 'Please log in to submit a review');
+      return;
+    }
+
     if (newRating === 0) {
       Alert.alert('Rating Required', 'Please select a rating');
       return;
@@ -87,21 +142,51 @@ export default function StationReviewsScreen() {
       return;
     }
 
-    // TODO: Submit review to API
-    Alert.alert(
-      'Review Submitted',
-      'Thank you for your feedback! Your review will help other EV drivers.',
-      [
-        {
-          text: 'OK',
-          onPress: () => {
-            setNewReview('');
-            setNewRating(0);
-            setShowAddReview(false);
-          }
-        }
-      ]
-    );
+    if (!stationId || typeof stationId !== 'string') {
+      Alert.alert('Error', 'Invalid station ID');
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      const reviewData = {
+        userId: user.id,
+        visitDate: new Date(),
+        stationId: stationId,
+        rating: newRating,
+        comment: newReview.trim(),
+        images: [] // TODO: Add image upload functionality
+      };
+
+      const response = await apiService.addReview(reviewData);
+
+      if (response.success) {
+        Alert.alert(
+          'Review Submitted',
+          'Thank you for your feedback! Your review will help other EV drivers.',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                setNewReview('');
+                setNewRating(0);
+                setShowAddReview(false);
+                // Refresh reviews to show the new one
+                fetchReviews();
+              }
+            }
+          ]
+        );
+      } else {
+        Alert.alert('Error', response.error || 'Failed to submit review. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error submitting review:', error);
+      Alert.alert('Error', 'Failed to submit review. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const renderStars = (rating: number, size: number = 16, interactive: boolean = false) => {
@@ -171,19 +256,47 @@ export default function StationReviewsScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Rating Summary */}
-        <View style={styles.summaryCard}>
-          <View style={styles.summaryHeader}>
-            <View style={styles.averageRating}>
-              <Text style={styles.averageNumber}>{averageRating.toFixed(1)}</Text>
-              {renderStars(Math.round(averageRating), 20)}
-              <Text style={styles.reviewCount}>{reviews.length} reviews</Text>
-            </View>
-            
-            {renderRatingDistribution()}
+      <ScrollView 
+        style={styles.content} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
+        {/* Error Banner */}
+        {error && (
+          <View style={styles.errorBanner}>
+            <Ionicons name="warning" size={16} color="#FF9800" />
+            <Text style={styles.errorBannerText}>{error}</Text>
+            <TouchableOpacity onPress={fetchReviews}>
+              <Ionicons name="refresh" size={16} color="#007AFF" />
+            </TouchableOpacity>
           </View>
-        </View>
+        )}
+
+        {/* Loading State */}
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <Text style={styles.loadingText}>Loading reviews...</Text>
+          </View>
+        ) : (
+          <>
+            {/* Rating Summary */}
+            <View style={styles.summaryCard}>
+              <View style={styles.summaryHeader}>
+                <View style={styles.averageRating}>
+                  <Text style={styles.averageNumber}>
+                    {reviews.length > 0 ? averageRating.toFixed(1) : '0.0'}
+                  </Text>
+                  {renderStars(Math.round(averageRating), 20)}
+                  <Text style={styles.reviewCount}>{reviews.length} reviews</Text>
+                </View>
+                
+                {renderRatingDistribution()}
+              </View>
+            </View>
+          </>
+        )}
 
         {/* Add Review Form */}
         {showAddReview && (
@@ -221,37 +334,58 @@ export default function StationReviewsScreen() {
               </TouchableOpacity>
               
               <TouchableOpacity 
-                style={styles.submitButton}
+                style={[styles.submitButton, submitting && styles.disabledButton]}
                 onPress={handleSubmitReview}
+                disabled={submitting}
               >
-                <Text style={styles.submitButtonText}>Submit Review</Text>
+                <Text style={styles.submitButtonText}>
+                  {submitting ? 'Submitting...' : 'Submit Review'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
         )}
 
         {/* Reviews List */}
-        <View style={styles.reviewsList}>
-          <Text style={styles.reviewsTitle}>All Reviews</Text>
-          
-          {reviews.map((review) => (
+        {!loading && (
+          <View style={styles.reviewsList}>
+            <Text style={styles.reviewsTitle}>All Reviews</Text>
+            
+            {reviews.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Ionicons name="chatbubble-outline" size={48} color="#ccc" />
+                <Text style={styles.emptyTitle}>No Reviews Yet</Text>
+                <Text style={styles.emptyText}>
+                  Be the first to share your experience at this charging station
+                </Text>
+                {!showAddReview && (
+                  <TouchableOpacity 
+                    style={styles.emptyButton}
+                    onPress={() => setShowAddReview(true)}
+                  >
+                    <Text style={styles.emptyButtonText}>Write First Review</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ) : (
+              reviews.map((review: any) => (
             <View key={review.id} style={styles.reviewCard}>
               <View style={styles.reviewHeader}>
                 <View style={styles.reviewerInfo}>
                   <View style={styles.avatar}>
                     <Text style={styles.avatarText}>
-                      {review.userId.charAt(0).toUpperCase()}
+                      {review.userId.firstName.charAt(0).toUpperCase()}
                     </Text>
                   </View>
                   <View style={styles.reviewerDetails}>
                     <View style={styles.reviewerName}>
-                      <Text style={styles.nameText}>User {review.userId.slice(-3)}</Text>
+                      <Text style={styles.nameText}>User {review.userId.firstName} {review.userId.lastName}</Text>
                       {review.isVerified && (
                         <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
                       )}
                     </View>
                     <Text style={styles.reviewDate}>
-                      {getRelativeTime(review.createdAt)}
+                      {getRelativeTime(new Date(review.createdAt))}
                     </Text>
                   </View>
                 </View>
@@ -263,7 +397,7 @@ export default function StationReviewsScreen() {
               
               <View style={styles.reviewFooter}>
                 <Text style={styles.visitDate}>
-                  Visited on {formatDateTime(review.visitDate)}
+                  Visited on {formatDateTime(new Date(review.visitDate))}
                 </Text>
                 
                 <View style={styles.reviewActions}>
@@ -274,8 +408,10 @@ export default function StationReviewsScreen() {
                 </View>
               </View>
             </View>
-          ))}
-        </View>
+              ))
+            )}
+          </View>
+        )}
 
         <View style={{ height: 100 }} />
       </ScrollView>
@@ -544,5 +680,65 @@ const styles = StyleSheet.create({
   helpfulText: {
     fontSize: 12,
     color: '#666',
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF8E1',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 16,
+    marginBottom: 8,
+    gap: 8,
+  },
+  errorBannerText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#FF9800',
+    fontWeight: '500',
+  },
+  loadingContainer: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#666',
+  },
+  emptyContainer: {
+    padding: 40,
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    marginVertical: 20,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  emptyButton: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  emptyButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  disabledButton: {
+    opacity: 0.5,
   },
 });

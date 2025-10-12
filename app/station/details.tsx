@@ -308,7 +308,7 @@ export default function StationDetailsScreen() {
         <View style={styles.header}>
           <View style={styles.titleSection}>
             <Text style={styles.stationName}>{station.name}</Text>
-            <TouchableOpacity onPress={() => router.push(`/station/reviews?id=${station.id}`)}>
+            <TouchableOpacity onPress={() => router.push(`/station/reviews?stationId=${station.id}`)}>
               <View style={styles.ratingContainer}>
                 <Ionicons name="star" size={16} color="#FFB800" />
                 <Text style={styles.rating}>{station.averageRating}</Text>
