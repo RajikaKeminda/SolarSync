@@ -114,12 +114,12 @@ class ApiService {
   }
 
   // User Profile APIs
-  async getUserProfile(): Promise<ApiResponse<User>> {
-    return this.request('/user/profile');
+  async getUserProfile(userId: string): Promise<ApiResponse<User>> {
+    return this.request(`/users/${userId}`);
   }
 
   async updateUserProfile(updates: Partial<User>): Promise<ApiResponse<User>> {
-    return this.request('/user/profile', {
+    return this.request(`/users/${updates.id}`, {
       method: 'PUT',
       body: JSON.stringify(updates),
     });
