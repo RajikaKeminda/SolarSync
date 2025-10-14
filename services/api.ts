@@ -226,6 +226,10 @@ class ApiService {
     return this.request('/charging-sessions');
   }
 
+  async getChargingSessionsByStationOwnerId(stationOwnerId: string): Promise<ApiResponse<ChargingSession[]>> {
+    return this.request(`/charging-sessions/station-owner/${stationOwnerId}`);
+  }
+
   async startChargingSession(data: {
     userId: string;
     stationId: string;

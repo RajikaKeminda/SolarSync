@@ -3,20 +3,23 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
 import {
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ChargingPortType } from '../../../types';
+import { apiService } from '../../../services/api';
+import { useAuthStore } from '../../../store';
+import { ChargingPortType, ChargingStation } from '../../../types';
 import { CHARGING_PORT_TYPES } from '../../../utils/constants';
 import { isValidEmail } from '../../../utils/helpers';
 
@@ -27,17 +30,12 @@ interface PortConfiguration {
   pricing: number;
 }
 
-interface OperatingHours {
-  isOpen: boolean;
-  is24Hours: boolean;
-  openTime?: string;
-  closeTime?: string;
-}
 
 export default function EditStationScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams();
+  const { token } = useAuthStore();
   
   // Basic Information
   const [stationName, setStationName] = useState('');
@@ -61,22 +59,23 @@ export default function EditStationScreen() {
   // Amenities
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
   
-  // Operating Hours
-  const [operatingHours, setOperatingHours] = useState<Record<string, OperatingHours>>({
-    monday: { isOpen: true, is24Hours: true },
-    tuesday: { isOpen: true, is24Hours: true },
-    wednesday: { isOpen: true, is24Hours: true },
-    thursday: { isOpen: true, is24Hours: true },
-    friday: { isOpen: true, is24Hours: true },
-    saturday: { isOpen: true, is24Hours: true },
-    sunday: { isOpen: true, is24Hours: true },
-  });
+  // Operating Hours (not used in current implementation)
+  // const [operatingHours, setOperatingHours] = useState<Record<string, OperatingHours>>({
+  //   monday: { isOpen: true, is24Hours: true },
+  //   tuesday: { isOpen: true, is24Hours: true },
+  //   wednesday: { isOpen: true, is24Hours: true },
+  //   thursday: { isOpen: true, is24Hours: true },
+  //   friday: { isOpen: true, is24Hours: true },
+  //   saturday: { isOpen: true, is24Hours: true },
+  //   sunday: { isOpen: true, is24Hours: true },
+  // });
   
   // Settings
   const [isActive, setIsActive] = useState(true);
   const [allowReservations, setAllowReservations] = useState(true);
   const [requireMembership, setRequireMembership] = useState(false);
   
+  const [station, setStation] = useState<ChargingStation | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -93,57 +92,60 @@ export default function EditStationScreen() {
 
   // Load existing station data
   useEffect(() => {
-    loadStationData();
-  }, [id]);
+    const loadData = async () => {
+      if (!id || !token) return;
+      
+      try {
+        setIsLoading(true);
+        apiService.setToken(token);
+        
+        const response = await apiService.getStationById(id as string);
+        
+        if (response.success && response.data) {
+          const stationData = response.data;
+          setStation(stationData);
+          
+          // Populate form with station data
+          setStationName(stationData.name);
+          setDescription(stationData.description || '');
+          setAddress(stationData.address);
+          setContactEmail(stationData.contactEmail || '');
+          setContactPhone(stationData.contactPhone || '');
+          setLatitude(stationData.latitude.toString());
+          setLongitude(stationData.longitude.toString());
+          
+          // Convert port types to our format
+          const portConfigs = stationData.portTypes.map(port => ({
+            type: port.type,
+            count: port.count,
+            maxPower: port.maxPower,
+            pricing: stationData.pricing.baseRate
+          }));
+          setPortConfigurations(portConfigs);
+          
+          setBaseRate(stationData.pricing.baseRate.toString());
+          setPeakRate(stationData.pricing.peakRate?.toString() || '');
+          setOffPeakRate(stationData.pricing.offPeakRate?.toString() || '');
+          setSelectedAmenities(stationData.amenities);
+          setIsActive(stationData.isActive);
+          setAllowReservations(true); // Default value
+          setRequireMembership(false); // Default value
+        } else {
+          Alert.alert('Error', response.error || 'Failed to load station data');
+          router.back();
+        }
+      } catch (error) {
+        console.error('Error loading station data:', error);
+        Alert.alert('Error', 'Failed to load station data');
+        router.back();
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-  const loadStationData = async () => {
-    try {
-      // TODO: Load from API
-      // Mock data for demo
-      const mockStationData = {
-        name: 'PowerStation Downtown',
-        description: 'Fast charging in the heart of the city with premium amenities.',
-        address: '123 Main St, Downtown, City 12345',
-        contactEmail: 'contact@powerstation.com',
-        contactPhone: '+1234567890',
-        latitude: '37.7849',
-        longitude: '-122.4094',
-        portConfigurations: [
-          { type: 'CCS2' as ChargingPortType, count: 4, maxPower: 150, pricing: 0.35 },
-          { type: 'Type2' as ChargingPortType, count: 4, maxPower: 22, pricing: 0.25 }
-        ],
-        baseRate: '0.35',
-        peakRate: '0.45',
-        offPeakRate: '0.28',
-        amenities: ['restroom', 'wifi', 'restaurant', 'parking'],
-        isActive: true,
-        allowReservations: true,
-        requireMembership: false
-      };
+    loadData();
+  }, [id, token, router]);
 
-      setStationName(mockStationData.name);
-      setDescription(mockStationData.description);
-      setAddress(mockStationData.address);
-      setContactEmail(mockStationData.contactEmail);
-      setContactPhone(mockStationData.contactPhone);
-      setLatitude(mockStationData.latitude);
-      setLongitude(mockStationData.longitude);
-      setPortConfigurations(mockStationData.portConfigurations);
-      setBaseRate(mockStationData.baseRate);
-      setPeakRate(mockStationData.peakRate);
-      setOffPeakRate(mockStationData.offPeakRate);
-      setSelectedAmenities(mockStationData.amenities);
-      setIsActive(mockStationData.isActive);
-      setAllowReservations(mockStationData.allowReservations);
-      setRequireMembership(mockStationData.requireMembership);
-
-    } catch (error) {
-      console.error('Error loading station data:', error);
-      Alert.alert('Error', 'Failed to load station data');
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const handleAddPortConfiguration = () => {
     setPortConfigurations([
@@ -176,18 +178,10 @@ export default function EditStationScreen() {
     }
   };
 
-  const handleOperatingHoursChange = (
-    day: string, 
-    field: keyof OperatingHours, 
-    value: any
-  ) => {
-    setOperatingHours({
-      ...operatingHours,
-      [day]: { ...operatingHours[day], [field]: value }
-    });
-  };
 
-  const handleDeleteStation = () => {
+  const handleDeleteStation = async () => {
+    if (!station || !token) return;
+    
     Alert.alert(
       'Delete Station',
       'Are you sure you want to delete this station? This action cannot be undone.',
@@ -196,13 +190,23 @@ export default function EditStationScreen() {
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => {
-            // TODO: Delete station via API
-            Alert.alert(
-              'Station Deleted',
-              'The station has been successfully deleted.',
-              [{ text: 'OK', onPress: () => router.back() }]
-            );
+          onPress: async () => {
+            try {
+              const response = await apiService.deleteStation(station.id);
+              
+              if (response.success) {
+                Alert.alert(
+                  'Station Deleted',
+                  'The station has been successfully deleted.',
+                  [{ text: 'OK', onPress: () => router.back() }]
+                );
+              } else {
+                Alert.alert('Error', response.error || 'Failed to delete station');
+              }
+            } catch (error) {
+              console.error('Error deleting station:', error);
+              Alert.alert('Error', 'Failed to delete station');
+            }
           }
         }
       ]
@@ -252,24 +256,55 @@ export default function EditStationScreen() {
   };
 
   const handleSubmit = async () => {
-    if (!validateForm()) return;
+    if (!validateForm() || !station || !token) return;
 
     setIsSubmitting(true);
 
     try {
-      // TODO: Update station via API
-      console.log('Updating station:', id);
+      // Convert port configurations to API format
+      const portTypes = portConfigurations.map(config => ({
+        type: config.type,
+        count: config.count,
+        maxPower: config.maxPower,
+        available: config.count // Assume all ports are available initially
+      }));
 
-      Alert.alert(
-        'Station Updated!',
-        `${stationName} has been successfully updated.`,
-        [
-          {
-            text: 'OK',
-            onPress: () => router.back()
-          }
-        ]
-      );
+      // Prepare station update data
+      const updateData = {
+        name: stationName.trim(),
+        description: description.trim(),
+        address: address.trim(),
+        latitude: parseFloat(latitude),
+        longitude: parseFloat(longitude),
+        portTypes,
+        pricing: {
+          baseRate: parseFloat(baseRate),
+          peakRate: peakRate ? parseFloat(peakRate) : undefined,
+          offPeakRate: offPeakRate ? parseFloat(offPeakRate) : undefined,
+          currency: 'USD'
+        },
+        amenities: selectedAmenities,
+        isActive,
+        contactEmail: contactEmail.trim() || undefined,
+        contactPhone: contactPhone.trim() || undefined,
+      };
+
+      const response = await apiService.updateStation(station.id, updateData);
+
+      if (response.success && response.data) {
+        Alert.alert(
+          'Station Updated!',
+          `${stationName} has been successfully updated.`,
+          [
+            {
+              text: 'OK',
+              onPress: () => router.back()
+            }
+          ]
+        );
+      } else {
+        Alert.alert('Error', response.error || 'Failed to update station');
+      }
 
     } catch (error) {
       console.error('Error updating station:', error);
@@ -367,7 +402,39 @@ export default function EditStationScreen() {
     return (
       <View style={[styles.container, styles.loadingContainer, { paddingTop: insets.top }]}>
         <StatusBar style="dark" />
-        <Text style={styles.loadingText}>Loading station data...</Text>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Ionicons name="close" size={24} color="#333" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Edit Station</Text>
+          <View style={{ width: 50 }} />
+        </View>
+        <View style={styles.loadingContent}>
+          <ActivityIndicator size="large" color="#007AFF" />
+          <Text style={styles.loadingText}>Loading station data...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (!station) {
+    return (
+      <View style={[styles.container, styles.loadingContainer, { paddingTop: insets.top }]}>
+        <StatusBar style="dark" />
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Ionicons name="close" size={24} color="#333" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Edit Station</Text>
+          <View style={{ width: 50 }} />
+        </View>
+        <View style={styles.loadingContent}>
+          <Ionicons name="alert-circle" size={48} color="#FF3B30" />
+          <Text style={styles.errorText}>Station not found</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => router.back()}>
+            <Text style={styles.retryButtonText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
@@ -389,9 +456,14 @@ export default function EditStationScreen() {
           onPress={handleSubmit}
           disabled={isSubmitting}
         >
-          <Text style={[styles.saveButton, isSubmitting && styles.disabledButton]}>
-            {isSubmitting ? 'Saving...' : 'Save'}
-          </Text>
+          {isSubmitting ? (
+            <View style={styles.loadingButtonContent}>
+              <ActivityIndicator size="small" color="#007AFF" />
+              <Text style={[styles.saveButton, styles.loadingButtonText]}>Saving...</Text>
+            </View>
+          ) : (
+            <Text style={styles.saveButton}>Save</Text>
+          )}
         </TouchableOpacity>
       </View>
 
@@ -726,10 +798,10 @@ const styles = StyleSheet.create({
   },
   inputRow: {
     flexDirection: 'row',
-    gap: 12,
   },
   inputColumn: {
     flex: 1,
+    marginRight: 12,
   },
   addPortButton: {
     flexDirection: 'row',
@@ -738,12 +810,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
-    gap: 4,
   },
   addPortButtonText: {
     fontSize: 12,
     color: '#007AFF',
     fontWeight: '500',
+    marginLeft: 4,
   },
   portCard: {
     backgroundColor: '#F8F9FA',
@@ -792,7 +864,6 @@ const styles = StyleSheet.create({
   portTypeSelector: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
   },
   portTypeButton: {
     backgroundColor: '#fff',
@@ -801,6 +872,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#007AFF',
+    marginRight: 8,
+    marginBottom: 8,
   },
   selectedPortTypeButton: {
     backgroundColor: '#007AFF',
@@ -816,7 +889,6 @@ const styles = StyleSheet.create({
   amenitiesGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
   },
   amenityButton: {
     flexDirection: 'row',
@@ -827,7 +899,8 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     borderColor: '#007AFF',
-    gap: 6,
+    marginRight: 12,
+    marginBottom: 12,
   },
   selectedAmenityButton: {
     backgroundColor: '#007AFF',
@@ -836,6 +909,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
     color: '#007AFF',
+    marginLeft: 6,
   },
   selectedAmenityButtonText: {
     color: '#fff',
@@ -871,11 +945,43 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#FF3B30',
-    gap: 8,
   },
   deleteButtonText: {
     fontSize: 14,
     fontWeight: '600',
     color: '#FF3B30',
+    marginLeft: 8,
+  },
+  loadingContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  loadingButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  loadingButtonText: {
+    color: '#007AFF',
+  },
+  errorText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#FF3B30',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  retryButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    marginTop: 20,
+  },
+  retryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
 });

@@ -1,118 +1,117 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
-    Alert,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { apiService } from '../../services/api';
+import { useAuthStore } from '../../store';
+import { ChargingSession } from '../../types';
 import { formatEnergy, formatPrice, getRelativeTime } from '../../utils/helpers';
 
 export default function SessionsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  
+  const { user, token } = useAuthStore();
+
+  const [sessions, setSessions] = useState<ChargingSession[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'active' | 'completed' | 'cancelled'>('all');
 
-  const onRefresh = React.useCallback(() => {
-    setRefreshing(true);
-    // TODO: Fetch latest session data
-    setTimeout(() => setRefreshing(false), 2000);
-  }, []);
+  // Fetch sessions data from API
+  const fetchSessions = useCallback(async () => {
+    if (!token || !user) return;
 
-  // Mock session data
-  const mockSessions = [
-    {
-      id: '1',
-      userId: 'user1',
-      userName: 'John Doe',
-      userPhone: '+1234567890',
-      stationId: '1',
-      stationName: 'PowerStation Downtown',
-      portType: 'CCS2',
-      startTime: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
-      endTime: new Date(Date.now() - 30 * 60 * 1000), // 30 minutes ago
-      energyDelivered: 45.2,
-      cost: 15.82,
-      status: 'completed' as const,
-      vehicleInfo: 'Tesla Model 3',
-      paymentStatus: 'paid',
-      rating: 5
-    },
-    {
-      id: '2',
-      userId: 'user2',
-      userName: 'Jane Smith',
-      userPhone: '+1234567891',
-      stationId: '2',
-      stationName: 'GreenCharge Mall',
-      portType: 'Type2',
-      startTime: new Date(Date.now() - 45 * 60 * 1000), // 45 minutes ago
-      endTime: null,
-      energyDelivered: 23.7,
-      cost: 8.30,
-      status: 'active' as const,
-      vehicleInfo: 'BMW i3',
-      paymentStatus: 'pending',
-      rating: null
-    },
-    {
-      id: '3',
-      userId: 'user3',
-      userName: 'Mike Johnson',
-      userPhone: '+1234567892',
-      stationId: '1',
-      stationName: 'PowerStation Downtown',
-      portType: 'CCS2',
-      startTime: new Date(Date.now() - 6 * 60 * 60 * 1000), // 6 hours ago
-      endTime: new Date(Date.now() - 5 * 60 * 60 * 1000), // 5 hours ago
-      energyDelivered: 67.8,
-      cost: 23.73,
-      status: 'completed' as const,
-      vehicleInfo: 'Audi e-tron',
-      paymentStatus: 'paid',
-      rating: 4
-    },
-    {
-      id: '4',
-      userId: 'user4',
-      userName: 'Sarah Wilson',
-      userPhone: '+1234567893',
-      stationId: '3',
-      stationName: 'FastCharge Highway',
-      portType: 'CHAdeMO',
-      startTime: new Date(Date.now() - 8 * 60 * 60 * 1000), // 8 hours ago
-      endTime: new Date(Date.now() - 7 * 60 * 60 * 1000), // 7 hours ago
-      energyDelivered: 0,
-      cost: 0,
-      status: 'cancelled' as const,
-      vehicleInfo: 'Nissan Leaf',
-      paymentStatus: 'refunded',
-      rating: null
+    try {
+      setLoading(true);
+      apiService.setToken(token);
+
+      // Fetch all charging sessions
+      const response = await apiService.getChargingSessionsByStationOwnerId(user.id);
+
+      if (response.success && response.data) {
+        // Filter sessions for this station owner's stations
+        // For now, we'll show all sessions, but in a real app you'd filter by station ownership
+        setSessions(response.data);
+      } else {
+        Alert.alert('Error', response.error || 'Failed to load sessions');
+      }
+
+    } catch (error) {
+      console.error('Error fetching sessions:', error);
+      Alert.alert('Error', 'Failed to load sessions');
+    } finally {
+      setLoading(false);
     }
-  ];
+  }, [token, user]);
 
-  const filteredSessions = mockSessions.filter(session => {
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchSessions();
+    setRefreshing(false);
+  }, [fetchSessions]);
+
+  // Load data when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchSessions();
+    }, [fetchSessions])
+  );
+
+  const filteredSessions = sessions.filter(session => {
     if (selectedFilter === 'all') return true;
     return session.status === selectedFilter;
   });
 
-  const handleSessionAction = (sessionId: string, action: 'stop' | 'support') => {
+  const handleSessionAction = async (sessionId: string, action: 'stop' | 'support') => {
     if (action === 'stop') {
       Alert.alert(
         'Stop Session',
         'Are you sure you want to stop this charging session?',
         [
           { text: 'Cancel' },
-          { text: 'Stop', style: 'destructive', onPress: () => console.log(`Stopping session ${sessionId}`) }
+          {
+            text: 'Stop',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                const response = await apiService.stopChargingSession(sessionId);
+
+                if (response.success && response.data) {
+                  // Update local sessions
+                  setSessions(prevSessions =>
+                    prevSessions.map(session =>
+                      session.id === sessionId
+                        ? { ...session, status: 'completed' as const, endTime: new Date() }
+                        : session
+                    )
+                  );
+
+                  Alert.alert(
+                    'Session Stopped',
+                    `Session completed. Final cost: ${formatPrice(response.data.cost)}`,
+                    [{ text: 'OK' }]
+                  );
+                } else {
+                  Alert.alert('Error', response.error || 'Failed to stop session');
+                }
+              } catch (error) {
+                console.error('Error stopping session:', error);
+                Alert.alert('Error', 'Failed to stop session');
+              }
+            }
+          }
         ]
       );
     } else {
@@ -149,8 +148,14 @@ export default function SessionsScreen() {
   };
 
   const renderStars = (rating: number | null) => {
-    if (!rating) return <Text style={styles.noRating}>No rating</Text>;
-    
+    if (!rating) {
+      return (
+        <View style={styles.starsContainer}>
+          <Text style={styles.noRating}>No rating</Text>
+        </View>
+      );
+    }
+
     const stars = [];
     for (let i = 1; i <= 5; i++) {
       stars.push(
@@ -159,6 +164,7 @@ export default function SessionsScreen() {
           name={i <= rating ? 'star' : 'star-outline'}
           size={12}
           color={i <= rating ? '#FFB800' : '#E0E0E0'}
+          style={{ marginRight: i < 5 ? 2 : 0 }}
         />
       );
     }
@@ -185,7 +191,7 @@ export default function SessionsScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <StatusBar style="dark" />
-      
+
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Charging Sessions</Text>
@@ -197,25 +203,25 @@ export default function SessionsScreen() {
       {/* Filters */}
       <View style={styles.filtersContainer}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <FilterButton 
-            filter="all" 
-            title="All" 
-            count={mockSessions.length} 
+          <FilterButton
+            filter="all"
+            title="All"
+            count={sessions.length}
           />
-          <FilterButton 
-            filter="active" 
-            title="Active" 
-            count={mockSessions.filter(s => s.status === 'active').length} 
+          <FilterButton
+            filter="active"
+            title="Active"
+            count={sessions.filter(s => s.status === 'active').length}
           />
-          <FilterButton 
-            filter="completed" 
-            title="Completed" 
-            count={mockSessions.filter(s => s.status === 'completed').length} 
+          <FilterButton
+            filter="completed"
+            title="Completed"
+            count={sessions.filter(s => s.status === 'completed').length}
           />
-          <FilterButton 
-            filter="cancelled" 
-            title="Cancelled" 
-            count={mockSessions.filter(s => s.status === 'cancelled').length} 
+          <FilterButton
+            filter="cancelled"
+            title="Cancelled"
+            count={sessions.filter(s => s.status === 'cancelled').length}
           />
         </ScrollView>
       </View>
@@ -227,108 +233,122 @@ export default function SessionsScreen() {
         }
         showsVerticalScrollIndicator={false}
       >
-        {filteredSessions.length > 0 ? (
-          filteredSessions.map((session) => (
-            <View key={session.id} style={styles.sessionCard}>
-              <View style={styles.sessionHeader}>
-                <View style={styles.sessionInfo}>
-                  <Text style={styles.sessionId}>Session #{session.id}</Text>
-                  <View style={styles.sessionStatus}>
-                    <View style={[
-                      styles.statusDot,
-                      { backgroundColor: getStatusColor(session.status) }
-                    ]} />
-                    <Text style={[
-                      styles.statusText,
-                      { color: getStatusColor(session.status) }
-                    ]}>
-                      {getStatusText(session.status)}
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#007AFF" />
+            <Text style={styles.loadingText}>Loading sessions...</Text>
+          </View>
+        ) : filteredSessions.length > 0 ? (
+          filteredSessions.map((session) => {
+            const stationName = typeof session.stationId === 'object' ? session.stationId.name : 'Charging Station';
+            const userName = typeof session.userId === 'object' ? `${session.userId.firstName} ${session.userId.lastName}` : 'User';
+            const userPhone = typeof session.userId === 'object' ? session.userId.phone : 'N/A';
+            const vehicleInfo = typeof session.vehicleId === 'object' ? `${session.vehicleId.make} ${session.vehicleId.model}` : 'Vehicle';
+
+            return (
+              <View key={session.id} style={styles.sessionCard}>
+                <View style={styles.sessionHeader}>
+                  <View style={styles.sessionInfo}>
+                    <Text style={styles.sessionId}>Session #{session.id.slice(-8)}</Text>
+                    <View style={styles.sessionStatus}>
+                      <View style={[
+                        styles.statusDot,
+                        { backgroundColor: getStatusColor(session.status) }
+                      ]} />
+                      <Text style={[
+                        styles.statusText,
+                        { color: getStatusColor(session.status) }
+                      ]}>
+                        {getStatusText(session.status)}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.sessionActions}>
+                    {session.status === 'active' && (
+                      <TouchableOpacity
+                        style={styles.actionIcon}
+                        onPress={() => handleSessionAction(session.id, 'stop')}
+                      >
+                        <Ionicons name="stop-circle" size={20} color="#F44336" />
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity
+                      style={styles.actionIcon}
+                      onPress={() => handleSessionAction(session.id, 'support')}
+                    >
+                      <Ionicons name="help-circle-outline" size={20} color="#007AFF" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <View style={styles.customerInfo}>
+                  <View style={styles.customerDetails}>
+                    <Text style={styles.customerName}>{userName}</Text>
+                    <Text style={styles.customerPhone}>{userPhone}</Text>
+                    <Text style={styles.vehicleInfo}>{vehicleInfo}</Text>
+                  </View>
+
+                  <View style={styles.stationDetails}>
+                    <Text style={styles.stationName}>{stationName}</Text>
+                    <Text style={styles.portType}>CCS2</Text>
+                  </View>
+                </View>
+
+                <View style={styles.sessionStats}>
+                  <View style={styles.statColumn}>
+                    <Text style={styles.statLabel}>Started</Text>
+                    <Text style={styles.statValue}>
+                      {getRelativeTime(new Date(session.startTime))}
+                    </Text>
+                  </View>
+
+                  <View style={styles.statColumn}>
+                    <Text style={styles.statLabel}>Duration</Text>
+                    <Text style={styles.statValue}>
+                      {session.endTime ?
+                        `${Math.round((new Date(session.endTime).getTime() - new Date(session.startTime).getTime()) / (1000 * 60))}m` :
+                        `${Math.round((Date.now() - new Date(session.startTime).getTime()) / (1000 * 60))}m`
+                      }
+                    </Text>
+                  </View>
+
+                  <View style={styles.statColumn}>
+                    <Text style={styles.statLabel}>Energy</Text>
+                    <Text style={styles.statValue}>
+                      {formatEnergy(session.energyDelivered)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.statColumn}>
+                    <Text style={styles.statLabel}>Revenue</Text>
+                    <Text style={styles.statValue}>
+                      {formatPrice(session.cost)}
                     </Text>
                   </View>
                 </View>
-                
-                <View style={styles.sessionActions}>
-                  {session.status === 'active' && (
-                    <TouchableOpacity 
-                      style={styles.actionIcon}
-                      onPress={() => handleSessionAction(session.id, 'stop')}
-                    >
-                      <Ionicons name="stop-circle" size={20} color="#F44336" />
-                    </TouchableOpacity>
-                  )}
-                  <TouchableOpacity 
-                    style={styles.actionIcon}
-                    onPress={() => handleSessionAction(session.id, 'support')}
-                  >
-                    <Ionicons name="help-circle-outline" size={20} color="#007AFF" />
-                  </TouchableOpacity>
-                </View>
-              </View>
 
-              <View style={styles.customerInfo}>
-                <View style={styles.customerDetails}>
-                  <Text style={styles.customerName}>{session.userName}</Text>
-                  <Text style={styles.customerPhone}>{session.userPhone}</Text>
-                  <Text style={styles.vehicleInfo}>{session.vehicleInfo}</Text>
-                </View>
-                
-                <View style={styles.stationDetails}>
-                  <Text style={styles.stationName}>{session.stationName}</Text>
-                  <Text style={styles.portType}>{session.portType}</Text>
-                </View>
-              </View>
+                <View style={styles.sessionFooter}>
+                  <View style={styles.paymentInfo}>
+                    <Text style={styles.paymentLabel}>Payment:</Text>
+                    <Text style={[
+                      styles.paymentStatus,
+                      { color: getPaymentStatusColor(session.paymentStatus) }
+                    ]}>
+                      {session.paymentStatus.charAt(0).toUpperCase() + session.paymentStatus.slice(1)}
+                    </Text>
+                  </View>
 
-              <View style={styles.sessionStats}>
-                <View style={styles.statColumn}>
-                  <Text style={styles.statLabel}>Started</Text>
-                  <Text style={styles.statValue}>
-                    {getRelativeTime(session.startTime)}
-                  </Text>
-                </View>
-                
-                <View style={styles.statColumn}>
-                  <Text style={styles.statLabel}>Duration</Text>
-                  <Text style={styles.statValue}>
-                    {session.endTime ? 
-                      `${Math.round((session.endTime.getTime() - session.startTime.getTime()) / (1000 * 60))}m` :
-                      `${Math.round((Date.now() - session.startTime.getTime()) / (1000 * 60))}m`
-                    }
-                  </Text>
-                </View>
-                
-                <View style={styles.statColumn}>
-                  <Text style={styles.statLabel}>Energy</Text>
-                  <Text style={styles.statValue}>
-                    {formatEnergy(session.energyDelivered)}
-                  </Text>
-                </View>
-                
-                <View style={styles.statColumn}>
-                  <Text style={styles.statLabel}>Revenue</Text>
-                  <Text style={styles.statValue}>
-                    {formatPrice(session.cost)}
-                  </Text>
+                  <View style={styles.ratingInfo}>
+                    <Text style={styles.ratingLabel}>Rating:</Text>
+                    <View style={styles.starsContainer}>
+                      <Text style={styles.noRating}>No rating</Text>
+                    </View>
+                  </View>
                 </View>
               </View>
-
-              <View style={styles.sessionFooter}>
-                <View style={styles.paymentInfo}>
-                  <Text style={styles.paymentLabel}>Payment:</Text>
-                  <Text style={[
-                    styles.paymentStatus,
-                    { color: getPaymentStatusColor(session.paymentStatus) }
-                  ]}>
-                    {session.paymentStatus.charAt(0).toUpperCase() + session.paymentStatus.slice(1)}
-                  </Text>
-                </View>
-                
-                <View style={styles.ratingInfo}>
-                  <Text style={styles.ratingLabel}>Rating:</Text>
-                  {renderStars(session.rating)}
-                </View>
-              </View>
-            </View>
-          ))
+            );
+          })
         ) : (
           <View style={styles.emptyState}>
             <Ionicons name="flash-outline" size={48} color="#ccc" />
@@ -429,12 +449,12 @@ const styles = StyleSheet.create({
   sessionStatus: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
   },
   statusDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
+    marginRight: 6,
   },
   statusText: {
     fontSize: 12,
@@ -442,10 +462,10 @@ const styles = StyleSheet.create({
   },
   sessionActions: {
     flexDirection: 'row',
-    gap: 8,
   },
   actionIcon: {
     padding: 4,
+    marginRight: 8,
   },
   customerInfo: {
     flexDirection: 'row',
@@ -514,11 +534,11 @@ const styles = StyleSheet.create({
   paymentInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
   },
   paymentLabel: {
     fontSize: 12,
     color: '#666',
+    marginRight: 6,
   },
   paymentStatus: {
     fontSize: 12,
@@ -527,15 +547,14 @@ const styles = StyleSheet.create({
   ratingInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
   },
   ratingLabel: {
     fontSize: 12,
     color: '#666',
+    marginRight: 6,
   },
   starsContainer: {
     flexDirection: 'row',
-    gap: 2,
   },
   noRating: {
     fontSize: 12,
@@ -558,5 +577,16 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
     lineHeight: 20,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 16,
   },
 });
