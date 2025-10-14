@@ -24,7 +24,7 @@ export default function AddVehicleScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
-  const { addVehicle, vehicles } = useVehicleStore();
+  const { addVehicle, vehicles, setSelectedVehicle } = useVehicleStore();
   
   const [make, setMake] = useState('');
   const [model, setModel] = useState('');
@@ -119,7 +119,7 @@ export default function AddVehicleScreen() {
       if (response.success && response.data) {
         // Add to local store
         addVehicle(response.data);
-
+        setSelectedVehicle(response.data);
         Alert.alert(
           'Vehicle Added',
           `${make} ${model} has been successfully added to your profile.`,

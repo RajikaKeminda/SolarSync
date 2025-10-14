@@ -1,52 +1,96 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
 import {
-    Alert,
-    Animated,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useChargingStore, useVehicleStore } from '../../store';
+import { apiService } from '../../services/api';
+import { useAuthStore, useChargingStore, useVehicleStore } from '../../store';
+import { ChargingSession } from '../../types';
 import { formatEnergy, formatPrice, formatTime, getBatteryColor } from '../../utils/helpers';
 
 export default function ChargingSessionScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { activeSessions, updateChargingSession } = useChargingStore();
+  const { sessionId } = useLocalSearchParams();
+  const { token } = useAuthStore();
+  const { updateChargingSession } = useChargingStore();
   const { selectedVehicle } = useVehicleStore();
   
+  const [session, setSession] = useState<ChargingSession | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [stopping, setStopping] = useState(false);
   const [animatedValue] = useState(new Animated.Value(0));
-  const [sessionTimer, setSessionTimer] = useState(0);
+  const [, setSessionTimer] = useState(0);
+  const [currentBattery, setCurrentBattery] = useState(25);
+  const [currentPower, setCurrentPower] = useState(0);
+  const [energyDelivered, setEnergyDelivered] = useState(0);
+  const [currentCost, setCurrentCost] = useState(0);
 
-  // Mock active session - in real app this would come from the store
-  const mockSession = {
-    id: 'session-1',
-    stationName: 'PowerStation Downtown',
-    stationAddress: '123 Main St, Downtown',
-    portType: 'CCS2',
-    maxPower: 150,
-    currentPower: 145,
-    startTime: new Date(Date.now() - 45 * 60 * 1000), // 45 minutes ago
-    energyDelivered: 32.5,
-    cost: 11.38,
-    startBattery: 25,
-    currentBattery: 68,
-    targetBattery: 80,
-    estimatedTimeRemaining: 12,
-    status: 'charging' as const
-  };
-
-  const session = activeSessions[0] || mockSession;
   const vehicle = selectedVehicle;
 
+  // Fetch session data
   useEffect(() => {
+    const fetchSession = async () => {
+      if (!token) return;
+      
+      try {
+        setLoading(true);
+        apiService.setToken(token);
+        
+        let sessionData: ChargingSession | null = null;
+        
+        if (sessionId) {
+          // Fetch specific session by ID
+          const response = await apiService.getChargingSessionById(sessionId as string);
+          if (response.success && response.data) {
+            sessionData = response.data;
+          }
+        } else {
+          // Fetch active sessions
+          const response = await apiService.getActiveSession();
+          if (response.success && response.data && response.data.length > 0) {
+            sessionData = response.data[0];
+          }
+        }
+        
+        if (sessionData) {
+          setSession(sessionData);
+          setCurrentBattery(sessionData.energyDelivered > 0 ? 
+            Math.min(100, 25 + (sessionData.energyDelivered / (vehicle?.batteryCapacity || 75)) * 100) : 25);
+          setCurrentPower(150); // Mock current power - would come from real-time data
+          setEnergyDelivered(sessionData.energyDelivered);
+          setCurrentCost(sessionData.cost);
+        } else {
+          Alert.alert('No Active Session', 'No active charging session found.');
+          router.back();
+        }
+      } catch (error) {
+        console.error('Error fetching session:', error);
+        Alert.alert('Error', 'Failed to load charging session');
+        router.back();
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchSession();
+  }, [sessionId, token, vehicle?.batteryCapacity, router]);
+
+  // Real-time updates
+  useEffect(() => {
+    if (!session) return;
+
     // Animate charging progress
     Animated.loop(
       Animated.sequence([
@@ -68,13 +112,38 @@ export default function ChargingSessionScreen() {
       setSessionTimer(prev => prev + 1);
     }, 1000);
 
+    // Poll for session updates every 30 seconds
+    const updateInterval = setInterval(async () => {
+      if (session.id && token) {
+        try {
+          const response = await apiService.getChargingSessionById(session.id);
+          if (response.success && response.data) {
+            const updatedSession = response.data;
+            setSession(updatedSession);
+            setCurrentBattery(updatedSession.energyDelivered > 0 ? 
+              Math.min(100, 25 + (updatedSession.energyDelivered / (vehicle?.batteryCapacity || 75)) * 100) : 25);
+            setEnergyDelivered(updatedSession.energyDelivered);
+            setCurrentCost(updatedSession.cost);
+            
+            // Update local store
+            updateChargingSession(updatedSession.id, updatedSession);
+          }
+        } catch (error) {
+          console.error('Error updating session:', error);
+        }
+      }
+    }, 30000);
+
     return () => {
       clearInterval(timer);
+      clearInterval(updateInterval);
       animatedValue.stopAnimation();
     };
-  }, []);
+  }, [session, token, vehicle?.batteryCapacity, updateChargingSession, animatedValue]);
 
-  const handleStopCharging = () => {
+  const handleStopCharging = async () => {
+    if (!session) return;
+    
     Alert.alert(
       'Stop Charging',
       'Are you sure you want to stop the charging session?',
@@ -83,31 +152,86 @@ export default function ChargingSessionScreen() {
         {
           text: 'Stop Charging',
           style: 'destructive',
-          onPress: () => {
-            updateChargingSession(session.id, {
-              status: 'completed',
-              endTime: new Date()
-            });
-            router.back();
+          onPress: async () => {
+            try {
+              setStopping(true);
+              const response = await apiService.stopChargingSession(session.id);
+              
+              if (response.success && response.data) {
+                // Update local store
+                updateChargingSession(session.id, {
+                  status: 'completed',
+                  endTime: new Date(),
+                  energyDelivered: response.data.energyDelivered,
+                  cost: response.data.cost
+                });
+                
+                Alert.alert(
+                  'Charging Stopped',
+                  `Session completed. Total cost: ${formatPrice(response.data.cost)}`,
+                  [{ text: 'OK', onPress: () => router.back() }]
+                );
+              } else {
+                Alert.alert('Error', response.error || 'Failed to stop charging session');
+              }
+            } catch (error) {
+              console.error('Error stopping session:', error);
+              Alert.alert('Error', 'Failed to stop charging session');
+            } finally {
+              setStopping(false);
+            }
           },
         },
       ]
     );
   };
 
-  const handlePauseCharging = () => {
-    Alert.alert(
-      'Pause Charging',
-      'Charging will be paused. You can resume it anytime.',
-      [
-        { text: 'Cancel' },
-        { text: 'Pause', onPress: () => console.log('Pause charging') },
-      ]
-    );
-  };
 
-  const sessionDuration = Math.floor((Date.now() - session.startTime.getTime()) / 1000 / 60);
-  const batteryProgress = (session.currentBattery - session.startBattery) / (session.targetBattery - session.startBattery);
+  const sessionDuration = session ? Math.floor((Date.now() - new Date(session.startTime).getTime()) / 1000 / 60) : 0;
+  const batteryProgress = session ? ((currentBattery - 25) / (80 - 25)) * 100 : 0;
+  const estimatedTimeRemaining = session && currentPower > 0 ? 
+    Math.round(((80 - currentBattery) / 100 * (vehicle?.batteryCapacity || 75)) / (currentPower / 60)) : 0;
+
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.loadingContainer, { paddingTop: insets.top }]}>
+        <StatusBar style="light" />
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Charging Session</Text>
+          <View style={{ width: 24 }} />
+        </View>
+        <View style={styles.loadingContent}>
+          <ActivityIndicator size="large" color="#fff" />
+          <Text style={styles.loadingText}>Loading session...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (!session) {
+    return (
+      <View style={[styles.container, styles.loadingContainer, { paddingTop: insets.top }]}>
+        <StatusBar style="light" />
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Charging Session</Text>
+          <View style={{ width: 24 }} />
+        </View>
+        <View style={styles.loadingContent}>
+          <Ionicons name="alert-circle" size={48} color="#fff" />
+          <Text style={styles.errorText}>No active session found</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => router.back()}>
+            <Text style={styles.retryButtonText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -119,7 +243,7 @@ export default function ChargingSessionScreen() {
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Charging Session</Text>
-        <TouchableOpacity onPress={() => router.push('/station/details')}>
+        <TouchableOpacity onPress={() => router.push(`/station/details?id=${typeof session.stationId === 'object' && session.stationId ? session.stationId.id : session.stationId}`)}>
           <Ionicons name="information-circle-outline" size={24} color="#fff" />
         </TouchableOpacity>
       </View>
@@ -127,16 +251,20 @@ export default function ChargingSessionScreen() {
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Station Info */}
         <View style={styles.stationCard}>
-          <Text style={styles.stationName}>{session.stationName}</Text>
-          <Text style={styles.stationAddress}>{session.stationAddress}</Text>
+          <Text style={styles.stationName}>
+            {typeof session.stationId === 'object' && session.stationId ? session.stationId.name : 'Charging Station'}
+          </Text>
+          <Text style={styles.stationAddress}>
+            {typeof session.stationId === 'object' && session.stationId ? session.stationId.address : 'Station Address'}
+          </Text>
           <View style={styles.stationDetails}>
             <View style={styles.stationDetail}>
               <Text style={styles.detailLabel}>Port Type</Text>
-              <Text style={styles.detailValue}>{session.portType}</Text>
+              <Text style={styles.detailValue}>CCS2</Text>
             </View>
             <View style={styles.stationDetail}>
               <Text style={styles.detailLabel}>Max Power</Text>
-              <Text style={styles.detailValue}>{session.maxPower} kW</Text>
+              <Text style={styles.detailValue}>150 kW</Text>
             </View>
           </View>
         </View>
@@ -152,8 +280,8 @@ export default function ChargingSessionScreen() {
                   style={[
                     styles.batteryInner,
                     { 
-                      height: `${session.currentBattery}%`,
-                      backgroundColor: getBatteryColor(session.currentBattery)
+                      height: `${currentBattery}%`,
+                      backgroundColor: getBatteryColor(currentBattery)
                     }
                   ]}
                 />
@@ -174,7 +302,7 @@ export default function ChargingSessionScreen() {
             </View>
             
             <View style={styles.batteryInfo}>
-              <Text style={styles.batteryLevel}>{session.currentBattery}%</Text>
+              <Text style={styles.batteryLevel}>{Math.round(currentBattery)}%</Text>
               <Text style={styles.batteryLabel}>Current Level</Text>
               
               <View style={styles.batteryProgress}>
@@ -182,18 +310,18 @@ export default function ChargingSessionScreen() {
                   <View 
                     style={[
                       styles.progressFill,
-                      { width: `${batteryProgress * 100}%` }
+                      { width: `${Math.min(100, Math.max(0, batteryProgress))}%` }
                     ]}
                   />
                 </View>
                 <Text style={styles.progressText}>
-                  {session.startBattery}% → {session.targetBattery}%
+                  25% → 80%
                 </Text>
               </View>
               
               {vehicle && (
                 <Text style={styles.rangeInfo}>
-                  Est. Range: {Math.round((session.currentBattery / 100) * vehicle.estimatedRange)} km
+                  Est. Range: {Math.round((currentBattery / 100) * vehicle.estimatedRange)} km
                 </Text>
               )}
             </View>
@@ -207,25 +335,25 @@ export default function ChargingSessionScreen() {
           <View style={styles.statusGrid}>
             <View style={styles.statusCard}>
               <Ionicons name="flash" size={24} color="#007AFF" />
-              <Text style={styles.statusValue}>{session.currentPower} kW</Text>
+              <Text style={styles.statusValue}>{currentPower} kW</Text>
               <Text style={styles.statusLabel}>Current Power</Text>
             </View>
             
             <View style={styles.statusCard}>
               <Ionicons name="time" size={24} color="#007AFF" />
-              <Text style={styles.statusValue}>{session.estimatedTimeRemaining}m</Text>
+              <Text style={styles.statusValue}>{estimatedTimeRemaining}m</Text>
               <Text style={styles.statusLabel}>Time Remaining</Text>
             </View>
             
             <View style={styles.statusCard}>
               <Ionicons name="battery-charging" size={24} color="#007AFF" />
-              <Text style={styles.statusValue}>{formatEnergy(session.energyDelivered)}</Text>
+              <Text style={styles.statusValue}>{formatEnergy(energyDelivered)}</Text>
               <Text style={styles.statusLabel}>Energy Delivered</Text>
             </View>
             
             <View style={styles.statusCard}>
               <Ionicons name="wallet" size={24} color="#007AFF" />
-              <Text style={styles.statusValue}>{formatPrice(session.cost)}</Text>
+              <Text style={styles.statusValue}>{formatPrice(currentCost)}</Text>
               <Text style={styles.statusLabel}>Current Cost</Text>
             </View>
           </View>
@@ -238,7 +366,7 @@ export default function ChargingSessionScreen() {
           <View style={styles.infoCard}>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Started at</Text>
-              <Text style={styles.infoValue}>{formatTime(session.startTime)}</Text>
+              <Text style={styles.infoValue}>{formatTime(new Date(session.startTime))}</Text>
             </View>
             
             <View style={styles.infoRow}>
@@ -248,7 +376,10 @@ export default function ChargingSessionScreen() {
             
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Rate</Text>
-              <Text style={styles.infoValue}>$0.35/kWh</Text>
+              <Text style={styles.infoValue}>
+                {typeof session.stationId === 'object' && session.stationId && session.stationId.pricing ? 
+                  `$${session.stationId.pricing.baseRate}/kWh` : '$0.35/kWh'}
+              </Text>
             </View>
             
             <View style={styles.infoRow}>
@@ -289,19 +420,21 @@ export default function ChargingSessionScreen() {
         {/* Action Buttons */}
         <View style={styles.actionButtons}>
           <TouchableOpacity 
-            style={styles.pauseButton}
-            onPress={handlePauseCharging}
-          >
-            <Ionicons name="pause" size={20} color="#FF9800" />
-            <Text style={styles.pauseButtonText}>Pause</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.stopButton}
+            style={[styles.stopButton, stopping && styles.stopButtonDisabled]}
             onPress={handleStopCharging}
+            disabled={stopping}
           >
-            <Ionicons name="stop" size={20} color="#fff" />
-            <Text style={styles.stopButtonText}>Stop Charging</Text>
+            {stopping ? (
+              <View style={styles.loadingButtonContent}>
+                <ActivityIndicator size="small" color="#fff" />
+                <Text style={styles.stopButtonText}>Stopping...</Text>
+              </View>
+            ) : (
+              <>
+                <Ionicons name="stop" size={20} color="#fff" />
+                <Text style={styles.stopButtonText}>Stop Charging</Text>
+              </>
+            )}
           </TouchableOpacity>
         </View>
 
@@ -583,29 +716,9 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   actionButtons: {
-    flexDirection: 'row',
-    gap: 12,
     marginBottom: 20,
   },
-  pauseButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFF8E1',
-    paddingVertical: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#FF9800',
-    gap: 8,
-  },
-  pauseButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FF9800',
-  },
   stopButton: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -618,5 +731,46 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  stopButtonDisabled: {
+    opacity: 0.7,
+  },
+  loadingButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  loadingContainer: {
+    justifyContent: 'center',
+  },
+  loadingContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#fff',
+    marginTop: 16,
+  },
+  errorText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  retryButton: {
+    backgroundColor: '#fff',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    marginTop: 20,
+  },
+  retryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#007AFF',
   },
 });

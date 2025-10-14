@@ -223,28 +223,87 @@ class ApiService {
 
   // Charging Session APIs
   async getChargingSessions(): Promise<ApiResponse<ChargingSession[]>> {
-    return this.request('/charging/sessions');
+    return this.request('/charging-sessions');
   }
 
   async startChargingSession(data: {
+    userId: string;
     stationId: string;
     vehicleId: string;
+    startTime: Date;
+    energyDelivered: number;
+    cost: number;
+    status: 'scheduled' | 'active' | 'completed' | 'cancelled';
     reservationId?: string;
   }): Promise<ApiResponse<ChargingSession>> {
-    return this.request('/charging/sessions/start', {
+    return this.request('/charging-sessions', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
+  async getChargingSessionById(sessionId: string): Promise<ApiResponse<ChargingSession>> {
+    //response format
+  //   {
+  //     "success": true,
+  //     "data": {
+  //         "_id": "68eeb91131c2ce614788eb45",
+  //         "userId": {
+  //             "_id": "68ceeb088ac13d62d57cb026",
+  //             "email": "rkeminda0@gmail.com",
+  //             "firstName": "Rajika",
+  //             "lastName": "Keminda",
+  //             "id": "68ceeb088ac13d62d57cb026"
+  //         },
+  //         "vehicleId": {
+  //             "_id": "68eeaa5073ef228ae22d7105",
+  //             "make": "Tesla",
+  //             "model": "Model 3",
+  //             "year": 2024,
+  //             "id": "68eeaa5073ef228ae22d7105"
+  //         },
+  //         "stationId": {
+  //             "_id": "68ea8d6ca158e11a25720f34",
+  //             "name": "cvbbh",
+  //             "address": "fhh",
+  //             "id": "68ea8d6ca158e11a25720f34"
+  //         },
+  //         "startTime": "2025-10-14T20:56:49.387Z",
+  //         "endTime": null,
+  //         "energyDelivered": 160,
+  //         "cost": 56,
+  //         "status": "active",
+  //         "paymentStatus": "pending",
+  //         "reservationId": {
+  //             "_id": "68eeb90f31c2ce614788eb43",
+  //             "scheduledStartTime": "2025-10-14T20:56:47.774Z",
+  //             "estimatedDuration": 64,
+  //             "id": "68eeb90f31c2ce614788eb43",
+  //             "estimatedEndTime": "2025-10-14T22:00:47.774Z",
+  //             "isActive": false,
+  //             "isUpcoming": false
+  //         },
+  //         "createdAt": "2025-10-14T20:56:49.447Z",
+  //         "updatedAt": "2025-10-14T20:56:49.447Z",
+  //         "__v": 0,
+  //         "id": "68eeb91131c2ce614788eb45",
+  //         "duration": null,
+  //         "isActive": true,
+  //         "isCompleted": false,
+  //         "costPerKwh": 0.35
+  //     }
+  // }
+    return this.request(`/charging-sessions/${sessionId}`);
+  }
+
   async stopChargingSession(sessionId: string): Promise<ApiResponse<ChargingSession>> {
-    return this.request(`/charging/sessions/${sessionId}/stop`, {
-      method: 'POST',
+    return this.request(`/charging-sessions/${sessionId}/end`, {
+      method: 'PATCH',
     });
   }
 
-  async getActiveSession(): Promise<ApiResponse<ChargingSession | null>> {
-    return this.request('/charging/sessions/active');
+  async getActiveSession(): Promise<ApiResponse<ChargingSession[] | null>> {
+    return this.request('/charging-sessions/active');
   }
 
   // Reservation APIs

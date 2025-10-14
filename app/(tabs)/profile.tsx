@@ -145,7 +145,7 @@ export default function ProfileScreen() {
               icon="car"
               title={`${vehicle.make} ${vehicle.model}`}
               subtitle={`${vehicle.year} • ${vehicle.batteryCapacity} kWh`}
-              onPress={() => router.push('/vehicle/edit')}
+              onPress={() => router.push(`/vehicle/edit?vehicleId=${vehicle.id}`)}
             />
           ))}
           <MenuItem

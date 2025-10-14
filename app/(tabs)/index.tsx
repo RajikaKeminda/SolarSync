@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { apiService } from '../../services/api';
 import { useAuthStore, useChargingStore, useVehicleStore } from '../../store';
 import { ChargingSession, Reservation } from '../../types';
-import { calculateEstimatedRange, formatTime, getBatteryColor } from '../../utils/helpers';
+import { calculateEstimatedRange, getBatteryColor } from '../../utils/helpers';
 
 const { width } = Dimensions.get('window');
 
@@ -24,9 +24,9 @@ export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
-  const { vehicles, selectedVehicle, setVehicles } = useVehicleStore();
+  const { vehicles, selectedVehicle, setVehicles, setSelectedVehicle } = useVehicleStore();
   const { setActiveSessions } = useChargingStore();
-  
+
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeSession, setActiveSession] = useState<ChargingSession | null>(null);
@@ -44,13 +44,19 @@ export default function HomeScreen() {
       const vehiclesResponse = await apiService.getVehicles();
       if (vehiclesResponse.success && vehiclesResponse.data) {
         setVehicles(vehiclesResponse.data);
+        setSelectedVehicle(vehiclesResponse.data.find(v => v.isDefault) || null);
       }
 
       // Fetch active charging session
       const activeSessionResponse = await apiService.getActiveSession();
       if (activeSessionResponse.success && activeSessionResponse.data) {
-        setActiveSession(activeSessionResponse.data);
-        setActiveSessions([activeSessionResponse.data]);
+        if (activeSessionResponse.data.length > 0) {
+          setActiveSession(activeSessionResponse.data[0]);
+          setActiveSessions(activeSessionResponse.data);
+        } else {
+          setActiveSession(null);
+          setActiveSessions([]);
+        }
       } else {
         setActiveSession(null);
         setActiveSessions([]);
@@ -70,7 +76,7 @@ export default function HomeScreen() {
     } finally {
       setLoading(false);
     }
-    }, [user?.id, setVehicles, setActiveSessions]);
+  }, [user?.id, setVehicles, setActiveSessions, setSelectedVehicle]);
 
   // Load data on mount
   useEffect(() => {
@@ -97,21 +103,22 @@ export default function HomeScreen() {
     return 'Good Evening';
   };
 
-  const currentVehicle = selectedVehicle || vehicles[0];
+  const currentVehicle = selectedVehicle || vehicles.find(v => v.isDefault) || vehicles[0];
+
   const nextReservation = upcomingReservations
     .sort((a: Reservation, b: Reservation) => new Date(a.scheduledStartTime).getTime() - new Date(b.scheduledStartTime).getTime())[0];
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <StatusBar style="dark" />
-      
+
       {/* Header */}
       <View style={styles.header}>
         <View>
           <Text style={styles.greeting}>{getGreeting()}</Text>
           <Text style={styles.userName}>{user?.firstName}</Text>
         </View>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.notificationButton}
           onPress={() => router.push('/notifications')}
         >
@@ -122,7 +129,7 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView 
+      <ScrollView
         style={styles.content}
         showsVerticalScrollIndicator={false}
         refreshControl={
@@ -145,11 +152,11 @@ export default function HomeScreen() {
                   {currentVehicle.make} {currentVehicle.model}
                 </Text>
               </View>
-              <TouchableOpacity onPress={() => router.push('/profile')}>
-                <Ionicons name="settings-outline" size={20} color="#666" />
+              <TouchableOpacity onPress={() => router.push(`/vehicle/edit?vehicleId=${currentVehicle.id}`)}>
+                <Ionicons name="create-outline" size={20} color="#666" />
               </TouchableOpacity>
             </View>
-            
+
             <View style={styles.batteryContainer}>
               <View style={styles.batteryInfo}>
                 <Text style={styles.batteryLevel}>
@@ -157,13 +164,13 @@ export default function HomeScreen() {
                 </Text>
                 <Text style={styles.batteryLabel}>Battery Level</Text>
               </View>
-              
+
               <View style={styles.batteryVisual}>
                 <View style={styles.batteryOuter}>
-                  <View 
+                  <View
                     style={[
                       styles.batteryInner,
-                      { 
+                      {
                         width: `${currentVehicle.currentBatteryLevel || 85}%`,
                         backgroundColor: getBatteryColor(currentVehicle.currentBatteryLevel || 85)
                       }
@@ -172,7 +179,7 @@ export default function HomeScreen() {
                 </View>
                 <View style={styles.batteryTip} />
               </View>
-              
+
               <View style={styles.rangeInfo}>
                 <Text style={styles.rangeValue}>
                   {calculateEstimatedRange(
@@ -185,7 +192,7 @@ export default function HomeScreen() {
             </View>
           </View>
         ) : (
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.addVehicleCard}
             onPress={() => router.push('/vehicle/add')}
           >
@@ -209,14 +216,14 @@ export default function HomeScreen() {
                 </Text>
               </View>
             </View>
-            
+
             <Text style={styles.stationName}>
               Charging Station
             </Text>
             <Text style={styles.chargingTime}>
-              Started at {formatTime(new Date(activeSession.startTime))}
+              {/* Started at {formatTime(new Date(activeSession.startTime))} */}
             </Text>
-            
+
             <View style={styles.chargingProgress}>
               <Text style={styles.energyDelivered}>
                 {(activeSession.energyDelivered || 0).toFixed(1)} kWh delivered
@@ -225,8 +232,8 @@ export default function HomeScreen() {
                 ${(activeSession.cost || 0).toFixed(2)}
               </Text>
             </View>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={styles.viewSessionButton}
               onPress={() => router.push('/charging/session')}
             >
@@ -242,14 +249,14 @@ export default function HomeScreen() {
               <Text style={styles.cardTitle}>Upcoming Reservation</Text>
               <Ionicons name="time-outline" size={16} color="#666" />
             </View>
-            
+
             <Text style={styles.reservationTime}>
-              {formatTime(new Date(nextReservation.scheduledStartTime))}
+              {/* {formatTime(new Date(nextReservation.scheduledStartTime))} */}
             </Text>
             <Text style={styles.reservationDate}>
               {new Date(nextReservation.scheduledStartTime).toDateString()}
             </Text>
-            
+
             <View style={styles.reservationDetails}>
               <Text style={styles.reservationStation}>
                 Charging Station
@@ -258,8 +265,8 @@ export default function HomeScreen() {
                 Duration: {nextReservation.estimatedDuration} minutes
               </Text>
             </View>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={styles.viewReservationButton}
               onPress={() => router.push(`/station/details?id=${nextReservation.stationId}`)}
             >
@@ -271,33 +278,33 @@ export default function HomeScreen() {
         {/* Quick Actions */}
         <View style={styles.quickActions}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
-          
+
           <View style={styles.actionGrid}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.actionButton}
               onPress={() => router.push('/explore')}
             >
               <Ionicons name="search" size={24} color="#007AFF" />
               <Text style={styles.actionText}>Find Stations</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={styles.actionButton}
               onPress={() => router.push('/trip/plan')}
             >
               <Ionicons name="map" size={24} color="#007AFF" />
               <Text style={styles.actionText}>Plan Trip</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={styles.actionButton}
               onPress={() => router.push('/charging')}
             >
               <Ionicons name="flash" size={24} color="#007AFF" />
               <Text style={styles.actionText}>My Charging</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={styles.actionButton}
               onPress={() => router.push('/analytics')}
             >
@@ -310,7 +317,7 @@ export default function HomeScreen() {
         {/* Tips Section */}
         <View style={styles.tipsSection}>
           <Text style={styles.sectionTitle}>Tips for You</Text>
-          
+
           <View style={styles.tipCard}>
             <Ionicons name="leaf" size={20} color="#4CAF50" />
             <View style={styles.tipContent}>
@@ -320,7 +327,7 @@ export default function HomeScreen() {
               </Text>
             </View>
           </View>
-          
+
           <View style={styles.tipCard}>
             <Ionicons name="battery-charging" size={20} color="#FF9800" />
             <View style={styles.tipContent}>

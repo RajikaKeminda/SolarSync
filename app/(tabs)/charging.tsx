@@ -3,13 +3,13 @@ import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
 import {
-    Alert,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -59,7 +59,7 @@ export default function ChargingScreen() {
           <Text style={styles.sessionStatus}>Charging</Text>
         </View>
         <Text style={styles.sessionTime}>
-          Started {formatTime(session.startTime)}
+          Started {formatTime(new Date(session.startTime))}
         </Text>
       </View>
       
@@ -111,7 +111,7 @@ export default function ChargingScreen() {
     <View key={session.id} style={styles.historyCard}>
       <View style={styles.historyHeader}>
         <Text style={styles.historyDate}>
-          {formatDateTime(session.startTime)}
+          {formatDateTime(new Date(session.startTime))}
         </Text>
         <View style={[
           styles.statusBadge,
@@ -157,7 +157,7 @@ export default function ChargingScreen() {
     <View key={reservation.id} style={styles.reservationCard}>
       <View style={styles.reservationHeader}>
         <Text style={styles.reservationDate}>
-          {formatDateTime(reservation.scheduledStartTime)}
+          {formatDateTime(new Date(reservation.scheduledStartTime))}
         </Text>
         <View style={[
           styles.statusBadge,
@@ -169,7 +169,7 @@ export default function ChargingScreen() {
         </View>
       </View>
       
-      <Text style={styles.reservationStation}>GreenCharge Station</Text>
+      <Text style={styles.reservationStation}>{reservation.stationName}</Text>
       <Text style={styles.reservationDuration}>
         Duration: {reservation.estimatedDuration} minutes
       </Text>

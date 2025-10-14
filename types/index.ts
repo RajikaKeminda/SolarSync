@@ -98,16 +98,22 @@ export interface DayHours {
 
 export interface ChargingSession {
   id: string;
-  userId: string;
-  vehicleId: string;
-  stationId: string;
+  userId: string | User;
+  vehicleId: string | Vehicle;
+  stationId: string | ChargingStation;
   startTime: Date;
   endTime?: Date;
   energyDelivered: number; // kWh
   cost: number;
   status: 'scheduled' | 'active' | 'completed' | 'cancelled';
   paymentStatus: 'pending' | 'paid' | 'failed';
-  reservationId?: string;
+  reservationId?: string | Reservation;
+  createdAt?: Date;
+  updatedAt?: Date;
+  duration?: number;
+  isActive?: boolean;
+  isCompleted?: boolean;
+  costPerKwh?: number;
 }
 
 export interface Reservation {

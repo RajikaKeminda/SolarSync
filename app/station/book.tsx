@@ -1,63 +1,88 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-    Alert,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useChargingStore, useVehicleStore } from '../../store';
-import { ChargingPortType, Reservation } from '../../types';
+import { apiService } from '../../services/api';
+import { useAuthStore, useChargingStore, useVehicleStore } from '../../store';
+import { ChargingPortType, ChargingStation } from '../../types';
 import {
-    calculateChargingCost,
-    calculateChargingTime,
-    formatPrice,
-    generateId
+  calculateChargingCost,
+  calculateChargingTime,
+  formatPrice
 } from '../../utils/helpers';
 
 export default function BookingScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { stationId } = useLocalSearchParams();
+  const { user, token } = useAuthStore();
   const { vehicles, selectedVehicle, setSelectedVehicle } = useVehicleStore();
-  const { addReservation } = useChargingStore();
+  const { addReservation, addChargingSession, setActiveSessions } = useChargingStore();
   
+  const [station, setStation] = useState<ChargingStation | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [bookingLoading, setBookingLoading] = useState(false);
   const [selectedPortType, setSelectedPortType] = useState<ChargingPortType>('CCS2');
   const [targetBatteryLevel, setTargetBatteryLevel] = useState(80);
   const [scheduledTime, setScheduledTime] = useState('now');
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedDate] = useState(new Date());
   const [selectedTimeSlot, setSelectedTimeSlot] = useState('09:00');
   const [addToCalendar, setAddToCalendar] = useState(true);
   const [sendReminder, setSendReminder] = useState(true);
 
-  // Mock station data
-  const mockStation = {
-    id: stationId as string,
-    name: 'PowerStation Downtown',
-    address: '123 Main St, Downtown',
-    pricing: { baseRate: 0.35, currency: 'USD' },
-    portTypes: [
-      { type: 'CCS2' as ChargingPortType, maxPower: 150, available: 2 },
-      { type: 'Type2' as ChargingPortType, maxPower: 22, available: 1 }
-    ]
-  };
+  // Fetch station details
+  useEffect(() => {
+    const fetchStation = async () => {
+      if (!stationId || !token) return;
+      
+      try {
+        setLoading(true);
+        apiService.setToken(token);
+        const response = await apiService.getStationById(stationId as string);
+        
+        if (response.success && response.data) {
+          setStation(response.data);
+          // Set default port type to first available port
+          if (response.data.portTypes.length > 0) {
+            setSelectedPortType(response.data.portTypes[0].type);
+          }
+        } else {
+          Alert.alert('Error', response.error || 'Failed to load station details');
+          router.back();
+        }
+      } catch (error) {
+        console.error('Error fetching station:', error);
+        Alert.alert('Error', 'Failed to load station details');
+        router.back();
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchStation();
+  }, [stationId, token, router]);
 
   const currentVehicle = selectedVehicle || vehicles[0];
   const currentBatteryLevel = currentVehicle?.currentBatteryLevel || 25;
-  const selectedPort = mockStation.portTypes.find(p => p.type === selectedPortType);
+  const selectedPort = station?.portTypes.find(p => p.type === selectedPortType);
   
   const estimatedDuration = currentVehicle && selectedPort ? 
     calculateChargingTime(currentBatteryLevel, targetBatteryLevel, currentVehicle.batteryCapacity, selectedPort.maxPower) : 0;
   
-  const estimatedCost = currentVehicle ? 
-    calculateChargingCost(currentBatteryLevel, targetBatteryLevel, currentVehicle.batteryCapacity, mockStation.pricing.baseRate) : 0;
+  const estimatedCost = currentVehicle && station ? 
+    calculateChargingCost(currentBatteryLevel, targetBatteryLevel, currentVehicle.batteryCapacity, station.pricing.baseRate) : 0;
 
   const timeSlots = [
     '08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
@@ -67,43 +92,119 @@ export default function BookingScreen() {
 
   const batteryLevels = [50, 60, 70, 80, 90, 100];
 
-  const handleBooking = () => {
+  const handleBooking = async () => {
     if (!currentVehicle) {
       Alert.alert('Error', 'Please select a vehicle');
       return;
     }
 
-    const reservation: Reservation = {
-      id: generateId(),
-      userId: 'current-user',
-      stationId: mockStation.id,
-      vehicleId: currentVehicle.id,
-      scheduledStartTime: scheduledTime === 'now' ? new Date() : 
-        new Date(`${selectedDate.toDateString()} ${selectedTimeSlot}`),
-      estimatedDuration: Math.round(estimatedDuration),
-      status: 'confirmed',
-      specialRequests: undefined,
-      createdAt: new Date()
-    };
+    if (!station || !user) {
+      Alert.alert('Error', 'Station or user information is missing');
+      return;
+    }
 
-    addReservation(reservation);
+    try {
+      setBookingLoading(true);
+      
+      const scheduledStartTime = scheduledTime === 'now' ? new Date() : 
+        new Date(`${selectedDate.toDateString()} ${selectedTimeSlot}`);
 
-    Alert.alert(
-      'Booking Confirmed!',
-      `Your charging session has been ${scheduledTime === 'now' ? 'started' : 'booked'} successfully.`,
-      [
-        {
-          text: 'OK',
-          onPress: () => {
-            router.back();
-            if (scheduledTime === 'now') {
-              router.push('/charging');
+      const reservationData = {
+        userId: user.id,
+        stationId: station.id,
+        vehicleId: currentVehicle.id,
+        scheduledStartTime,
+        estimatedDuration: Math.round(estimatedDuration),
+        specialRequests: undefined
+      };
+
+      const response = await apiService.createReservation(reservationData);
+
+      if (response.success && response.data) {
+        // Add to local store
+        addReservation(response.data);
+
+        Alert.alert(
+          'Booking Confirmed!',
+          `Your charging session has been ${scheduledTime === 'now' ? 'started' : 'booked'} successfully.`,
+          [
+            {
+              text: 'OK',
+              onPress: async () => {
+                router.back();
+                if (scheduledTime === 'now') {
+                  const sessionResponse = await apiService.startChargingSession({
+                    userId: user.id,
+                    startTime: new Date(),
+                    energyDelivered: ((targetBatteryLevel - currentBatteryLevel) / 100 * (currentVehicle?.batteryCapacity || 0)),
+                    cost: estimatedCost,
+                    status: 'active',
+                    stationId: station.id,
+                    vehicleId: currentVehicle.id,
+                    reservationId: response.data?.id
+                  });
+                  if (sessionResponse.success && sessionResponse.data) {
+                    addChargingSession(sessionResponse.data);
+                    setActiveSessions([sessionResponse.data]);
+                    router.push('/charging/session');
+                  }
+                  
+                }
+              }
             }
-          }
-        }
-      ]
-    );
+          ]
+        );
+      } else {
+        Alert.alert('Booking Failed', response.error || 'Failed to create reservation');
+      }
+    } catch (error) {
+      console.error('Error creating reservation:', error);
+      Alert.alert('Error', 'Failed to create reservation. Please try again.');
+    } finally {
+      setBookingLoading(false);
+    }
   };
+
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.loadingContainer, { paddingTop: insets.top }]}>
+        <StatusBar style="dark" />
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={24} color="#333" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Book Charging</Text>
+          <View style={{ width: 24 }} />
+        </View>
+        <View style={styles.loadingContent}>
+          <ActivityIndicator size="large" color="#007AFF" />
+          <Text style={styles.loadingText}>Loading station details...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (!station) {
+    return (
+      <View style={[styles.container, styles.loadingContainer, { paddingTop: insets.top }]}>
+        <StatusBar style="dark" />
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={24} color="#333" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Book Charging</Text>
+          <View style={{ width: 24 }} />
+        </View>
+        <View style={styles.loadingContent}>
+          <Ionicons name="alert-circle" size={48} color="#FF3B30" />
+          <Text style={styles.errorText}>Station not found</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => router.back()}>
+            <Text style={styles.retryButtonText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -121,8 +222,16 @@ export default function BookingScreen() {
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Station Info */}
         <View style={styles.stationCard}>
-          <Text style={styles.stationName}>{mockStation.name}</Text>
-          <Text style={styles.stationAddress}>{mockStation.address}</Text>
+          <Text style={styles.stationName}>{station.name}</Text>
+          <Text style={styles.stationAddress}>{station.address}</Text>
+          {station.averageRating > 0 && (
+            <View style={styles.ratingContainer}>
+              <Ionicons name="star" size={16} color="#FFD700" />
+              <Text style={styles.ratingText}>
+                {station.averageRating.toFixed(1)} ({station.totalReviews} reviews)
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Vehicle Selection */}
@@ -158,7 +267,7 @@ export default function BookingScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Charging Port</Text>
           
-          {mockStation.portTypes.map((port) => (
+          {station.portTypes.map((port) => (
             <TouchableOpacity
               key={port.type}
               style={[
@@ -353,7 +462,7 @@ export default function BookingScreen() {
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Rate</Text>
               <Text style={styles.summaryValue}>
-                {formatPrice(mockStation.pricing.baseRate)}/kWh
+                {formatPrice(station.pricing.baseRate)}/kWh
               </Text>
             </View>
             
@@ -368,10 +477,21 @@ export default function BookingScreen() {
           </View>
         </View>
 
-        <TouchableOpacity style={styles.bookButton} onPress={handleBooking}>
-          <Text style={styles.bookButtonText}>
-            {scheduledTime === 'now' ? 'Start Charging Now' : 'Confirm Booking'}
-          </Text>
+        <TouchableOpacity 
+          style={[styles.bookButton, bookingLoading && styles.bookButtonDisabled]} 
+          onPress={handleBooking}
+          disabled={bookingLoading}
+        >
+          {bookingLoading ? (
+            <View style={styles.loadingButtonContent}>
+              <ActivityIndicator size="small" color="#fff" />
+              <Text style={styles.bookButtonText}>Processing...</Text>
+            </View>
+          ) : (
+            <Text style={styles.bookButtonText}>
+              {scheduledTime === 'now' ? 'Start Charging Now' : 'Confirm Booking'}
+            </Text>
+          )}
         </TouchableOpacity>
 
         <View style={{ height: 100 }} />
@@ -663,5 +783,57 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  bookButtonDisabled: {
+    opacity: 0.7,
+  },
+  loadingButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  loadingContainer: {
+    justifyContent: 'center',
+  },
+  loadingContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 16,
+  },
+  errorText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#FF3B30',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  retryButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    marginTop: 20,
+  },
+  retryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  ratingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    gap: 4,
+  },
+  ratingText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
   },
 });

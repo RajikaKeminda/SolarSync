@@ -96,6 +96,10 @@ export const calculateChargingTime = (
   batteryCapacity: number,
   chargingPower: number
 ): number => {
+  console.log('currentLevel', currentLevel);
+  console.log('targetLevel', targetLevel);
+  console.log('batteryCapacity', batteryCapacity);
+  console.log('chargingPower', chargingPower);
   const energyNeeded = ((targetLevel - currentLevel) / 100) * batteryCapacity;
   return (energyNeeded / chargingPower) * 60; // Convert to minutes
 };
