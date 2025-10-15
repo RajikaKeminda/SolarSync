@@ -27,6 +27,8 @@ export default function BusinessDashboard() {
   const [refreshing, setRefreshing] = useState(false);
 
   const [businessData, setBusinessData] = useState<any>(null);
+  const [stationStatusData, setStationStatusData] = useState<any[]>([]);
+  const [stationStatusLoading, setStationStatusLoading] = useState(false);
 
   const fetchBusinessData = useCallback(async () => {
     if (!user?.id) return;
@@ -41,16 +43,33 @@ export default function BusinessDashboard() {
     }
   }, [user?.id]);
 
+  const fetchStationStatus = useCallback(async () => {
+    if (!user?.id) return;
+
+    setStationStatusLoading(true);
+    try {
+      const response = await apiService.getStationStatus(user.id);
+      if (response.success && response.data) {
+        setStationStatusData(response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching station status:', error);
+    } finally {
+      setStationStatusLoading(false);
+    }
+  }, [user?.id]);
+
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
-    await fetchBusinessData();
+    await Promise.all([fetchBusinessData(), fetchStationStatus()]);
     setRefreshing(false);
-  }, [fetchBusinessData]);
+  }, [fetchBusinessData, fetchStationStatus]);
 
-  // Load business data
+  // Load business data and station status
   useEffect(() => {
     fetchBusinessData();
-  }, [fetchBusinessData]);
+    fetchStationStatus();
+  }, [fetchBusinessData, fetchStationStatus]);
 
   // Mock data for business dashboard (fallback)
   const mockData = {
@@ -73,7 +92,39 @@ export default function BusinessDashboard() {
     ]
   };
 
+  // Mock data for station status (fallback)
+  const mockStationStatus = [
+    {
+      id: '1',
+      name: 'PowerStation Downtown',
+      status: 'online',
+      availablePorts: 6,
+      totalPorts: 8,
+      activeSessions: 2,
+      location: 'Downtown Area'
+    },
+    {
+      id: '2',
+      name: 'GreenCharge Mall',
+      status: 'online',
+      availablePorts: 10,
+      totalPorts: 12,
+      activeSessions: 2,
+      location: 'Shopping Mall'
+    },
+    {
+      id: '3',
+      name: 'FastCharge Highway',
+      status: 'maintenance',
+      availablePorts: 0,
+      totalPorts: 6,
+      activeSessions: 0,
+      location: 'Highway Exit 15'
+    }
+  ];
+
   const currentData = businessData || mockData;
+  const currentStationStatus = stationStatusData.length > 0 ? stationStatusData : mockStationStatus;
 
   const StatCard = ({ icon, title, value, subtitle, color = '#007AFF', onPress }: {
     icon: string;
@@ -100,6 +151,19 @@ export default function BusinessDashboard() {
     if (hour < 12) return 'Good Morning';
     if (hour < 18) return 'Good Afternoon';
     return 'Good Evening';
+  };
+
+  const getStatusDisplay = (status: string) => {
+    switch (status) {
+      case 'online':
+        return { text: 'Online', color: '#4CAF50', dotColor: '#4CAF50' };
+      case 'maintenance':
+        return { text: 'Maintenance', color: '#FF9800', dotColor: '#FF9800' };
+      case 'offline':
+        return { text: 'Offline', color: '#F44336', dotColor: '#F44336' };
+      default:
+        return { text: 'Unknown', color: '#666', dotColor: '#666' };
+    }
   };
 
   return (
@@ -223,7 +287,7 @@ export default function BusinessDashboard() {
             
             <TouchableOpacity 
               style={styles.actionButton}
-              onPress={() => router.push('/business/settings')}
+              onPress={() => router.push('/business/profile')}
             >
               <Ionicons name="settings" size={24} color="#007AFF" />
               <Text style={styles.actionText}>Settings</Text>
@@ -240,7 +304,7 @@ export default function BusinessDashboard() {
             </TouchableOpacity>
           </View>
           
-          {(currentData.recentSessions || mockData.recentSessions).map((session) => (
+          {(currentData.recentSessions || mockData.recentSessions).map((session: any) => (
             <View key={session.id} style={styles.sessionCard}>
               <View style={styles.sessionHeader}>
                 <Text style={styles.sessionStation}>{session.stationName}</Text>
@@ -275,49 +339,52 @@ export default function BusinessDashboard() {
 
         {/* Station Status */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Station Status</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Station Status</Text>
+            {stationStatusLoading && (
+              <Text style={styles.loadingText}>Loading...</Text>
+            )}
+          </View>
           
-          <View style={styles.stationCard}>
-            <View style={styles.stationHeader}>
-              <Text style={styles.stationName}>PowerStation Downtown</Text>
-              <View style={styles.onlineStatus}>
-                <View style={styles.onlineDot} />
-                <Text style={styles.onlineText}>Online</Text>
-              </View>
+          {currentStationStatus.map((station) => {
+            const statusDisplay = getStatusDisplay(station.status);
+            return (
+              <TouchableOpacity 
+                key={station.id} 
+                style={styles.stationCard}
+                onPress={() => router.push(`/business/station/edit?id=${station.id}`)}
+              >
+                <View style={styles.stationHeader}>
+                  <Text style={styles.stationName}>{station.name}</Text>
+                  <View style={styles.onlineStatus}>
+                    <View style={[styles.onlineDot, { backgroundColor: statusDisplay.dotColor }]} />
+                    <Text style={[styles.onlineText, { color: statusDisplay.color }]}>
+                      {statusDisplay.text}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.stationStats}>
+                  <Text style={styles.stationStat}>
+                    {station.availablePorts}/{station.totalPorts} ports available
+                  </Text>
+                  <Text style={styles.stationStat}>
+                    {station.activeSessions} active sessions
+                  </Text>
+                </View>
+                {station.location && (
+                  <Text style={styles.stationLocation}>{station.location}</Text>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+          
+          {currentStationStatus.length === 0 && !stationStatusLoading && (
+            <View style={styles.emptyState}>
+              <Ionicons name="business-outline" size={48} color="#ccc" />
+              <Text style={styles.emptyStateText}>No stations found</Text>
+              <Text style={styles.emptyStateSubtext}>Add your first charging station to get started</Text>
             </View>
-            <View style={styles.stationStats}>
-              <Text style={styles.stationStat}>6/8 ports available</Text>
-              <Text style={styles.stationStat}>2 active sessions</Text>
-            </View>
-          </View>
-
-          <View style={styles.stationCard}>
-            <View style={styles.stationHeader}>
-              <Text style={styles.stationName}>GreenCharge Mall</Text>
-              <View style={styles.onlineStatus}>
-                <View style={styles.onlineDot} />
-                <Text style={styles.onlineText}>Online</Text>
-              </View>
-            </View>
-            <View style={styles.stationStats}>
-              <Text style={styles.stationStat}>10/12 ports available</Text>
-              <Text style={styles.stationStat}>2 active sessions</Text>
-            </View>
-          </View>
-
-          <View style={styles.stationCard}>
-            <View style={styles.stationHeader}>
-              <Text style={styles.stationName}>FastCharge Highway</Text>
-              <View style={[styles.onlineStatus, styles.maintenanceStatus]}>
-                <View style={[styles.onlineDot, styles.maintenanceDot]} />
-                <Text style={[styles.onlineText, styles.maintenanceText]}>Maintenance</Text>
-              </View>
-            </View>
-            <View style={styles.stationStats}>
-              <Text style={styles.stationStat}>0/6 ports available</Text>
-              <Text style={styles.stationStat}>Scheduled maintenance</Text>
-            </View>
-          </View>
+          )}
         </View>
 
         <View style={{ height: 100 }} />
@@ -646,5 +713,43 @@ const styles = StyleSheet.create({
   stationStat: {
     fontSize: 12,
     color: '#666',
+  },
+  stationLocation: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  loadingText: {
+    fontSize: 12,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  emptyState: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  emptyStateText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginTop: 12,
+  },
+  emptyStateSubtext: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
+    textAlign: 'center',
   },
 });
