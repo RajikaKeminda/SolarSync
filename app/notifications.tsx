@@ -1,119 +1,212 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { getRelativeTime } from '../utils/helpers';
+import { apiService } from '../services/api';
+import { realTimeService } from '../services/realTimeService';
+import { useAuthStore } from '../store';
 
 interface Notification {
   id: string;
-  type: 'charging' | 'reservation' | 'promotion' | 'system' | 'weather';
   title: string;
   message: string;
-  timestamp: Date;
-  read: boolean;
+  type: 'info' | 'success' | 'warning' | 'error';
+  isRead: boolean;
+  createdAt: string;
   data?: any;
 }
 
 export default function NotificationsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user } = useAuthStore();
   
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [refreshing, setRefreshing] = useState(false);
-  const [notifications, setNotifications] = useState<Notification[]>([
-    {
-      id: '1',
-      type: 'charging',
-      title: 'Charging Complete',
-      message: 'Your vehicle is fully charged at PowerStation Downtown. 45.2 kWh delivered for $15.82.',
-      timestamp: new Date(Date.now() - 30 * 60 * 1000),
-      read: false,
-    },
-    {
-      id: '2',
-      type: 'reservation',
-      title: 'Reservation Reminder',
-      message: 'Your charging session at GreenCharge Mall starts in 15 minutes.',
-      timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000),
-      read: true,
-    },
-    {
-      id: '3',
-      type: 'promotion',
-      title: 'Special Offer',
-      message: '20% off charging at all FastCharge locations this weekend!',
-      timestamp: new Date(Date.now() - 4 * 60 * 60 * 1000),
-      read: false,
-    },
-    {
-      id: '4',
-      type: 'weather',
-      title: 'Weather Alert',
-      message: 'Cold weather may reduce your vehicle range by up to 20%. Plan accordingly.',
-      timestamp: new Date(Date.now() - 6 * 60 * 60 * 1000),
-      read: true,
-    },
-    {
-      id: '5',
-      type: 'system',
-      title: 'App Update Available',
-      message: 'New features and improvements are available. Update now for the best experience.',
-      timestamp: new Date(Date.now() - 12 * 60 * 60 * 1000),
-      read: true,
-    },
-  ]);
+  const [loading, setLoading] = useState(true);
+  const [unreadCount, setUnreadCount] = useState(0);
 
-  const onRefresh = React.useCallback(() => {
+  const fetchNotifications = useCallback(async () => {
+    if (!user?.id) return;
+
+    try {
+      const [notificationsResponse, unreadResponse] = await Promise.all([
+        apiService.getNotifications(user.id, 50, 0),
+        apiService.getUnreadNotificationsCount(user.id)
+      ]);
+
+      if (notificationsResponse.success && notificationsResponse.data) {
+        setNotifications(notificationsResponse.data);
+      }
+
+      if (unreadResponse.success && unreadResponse.data) {
+        setUnreadCount(unreadResponse.data.unreadCount);
+      }
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.id]);
+
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    // TODO: Fetch notifications from API
-    setTimeout(() => setRefreshing(false), 2000);
+    await fetchNotifications();
+    setRefreshing(false);
+  }, [fetchNotifications]);
+
+  const markAsRead = useCallback(async (notificationId: string) => {
+    try {
+      const response = await apiService.markNotificationAsRead(notificationId);
+      if (response.success) {
+        setNotifications(prev => 
+          prev.map(n => 
+            n.id === notificationId 
+              ? { ...n, isRead: true }
+              : n
+          )
+        );
+        setUnreadCount(prev => Math.max(0, prev - 1));
+      }
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+    }
   }, []);
 
-  const markAsRead = (id: string) => {
-    setNotifications(prev => 
-      prev.map(notif => 
-        notif.id === id ? { ...notif, read: true } : notif
-      )
-    );
-  };
+  const markAllAsRead = useCallback(async () => {
+    if (!user?.id) return;
 
-  const markAllAsRead = () => {
-    setNotifications(prev => 
-      prev.map(notif => ({ ...notif, read: true }))
-    );
-  };
+    try {
+      const response = await apiService.markAllNotificationsAsRead(user.id);
+      if (response.success) {
+        setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+        setUnreadCount(0);
+      }
+    } catch (error) {
+      console.error('Error marking all notifications as read:', error);
+    }
+  }, [user?.id]);
 
-  const deleteNotification = (id: string) => {
-    setNotifications(prev => prev.filter(notif => notif.id !== id));
-  };
+  const deleteNotification = useCallback(async (notificationId: string) => {
+    try {
+      const response = await apiService.deleteNotification(notificationId);
+      if (response.success) {
+        setNotifications(prev => prev.filter(n => n.id !== notificationId));
+        // Update unread count if the deleted notification was unread
+        const deletedNotification = notifications.find(n => n.id === notificationId);
+        if (deletedNotification && !deletedNotification.isRead) {
+          setUnreadCount(prev => Math.max(0, prev - 1));
+        }
+      }
+    } catch (error) {
+      console.error('Error deleting notification:', error);
+    }
+  }, [notifications]);
+
+  // Load notifications on mount
+  useEffect(() => {
+    fetchNotifications();
+  }, [fetchNotifications]);
+
+  // Set up real-time updates
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const unsubscribe = realTimeService.subscribe('notification', (update) => {
+      if (update.action === 'created') {
+        // Add new notification to the list
+        setNotifications(prev => [update.data, ...prev]);
+        setUnreadCount(prev => prev + 1);
+      }
+    });
+
+    return unsubscribe;
+  }, [user?.id]);
 
   const getNotificationIcon = (type: string) => {
     switch (type) {
-      case 'charging':
-        return { name: 'flash', color: '#4CAF50' };
-      case 'reservation':
-        return { name: 'calendar', color: '#007AFF' };
-      case 'promotion':
-        return { name: 'gift', color: '#FF9800' };
-      case 'weather':
-        return { name: 'cloud', color: '#9E9E9E' };
-      case 'system':
-        return { name: 'settings', color: '#666' };
+      case 'success':
+        return 'checkmark-circle';
+      case 'warning':
+        return 'warning';
+      case 'error':
+        return 'alert-circle';
       default:
-        return { name: 'notifications', color: '#007AFF' };
+        return 'information-circle';
     }
   };
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  const getNotificationColor = (type: string) => {
+    switch (type) {
+      case 'success':
+        return '#4CAF50';
+      case 'warning':
+        return '#FF9800';
+      case 'error':
+        return '#F44336';
+      default:
+        return '#2196F3';
+    }
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
+
+    if (diffInHours < 1) {
+      return 'Just now';
+    } else if (diffInHours < 24) {
+      return `${Math.floor(diffInHours)}h ago`;
+    } else if (diffInHours < 168) { // 7 days
+      return `${Math.floor(diffInHours / 24)}d ago`;
+    } else {
+      return date.toLocaleDateString();
+    }
+  };
+
+  const renderNotification = ({ item }: { item: Notification }) => (
+    <TouchableOpacity
+      style={[
+        styles.notificationCard,
+        !item.isRead && styles.unreadNotification
+      ]}
+      onPress={() => markAsRead(item.id)}
+    >
+      <View style={styles.notificationContent}>
+        <View style={styles.notificationHeader}>
+          <View style={[styles.iconContainer, { backgroundColor: getNotificationColor(item.type) + '20' }]}>
+            <Ionicons 
+              name={getNotificationIcon(item.type) as any} 
+              size={20} 
+              color={getNotificationColor(item.type)} 
+            />
+          </View>
+          <View style={styles.notificationText}>
+            <Text style={styles.notificationTitle}>{item.title}</Text>
+            <Text style={styles.notificationMessage}>{item.message}</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={() => deleteNotification(item.id)}
+          >
+            <Ionicons name="trash-outline" size={16} color="#999" />
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.notificationTime}>{formatDate(item.createdAt)}</Text>
+      </View>
+    </TouchableOpacity>
+  );
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -127,89 +220,35 @@ export default function NotificationsScreen() {
         <Text style={styles.headerTitle}>Notifications</Text>
         {unreadCount > 0 && (
           <TouchableOpacity onPress={markAllAsRead}>
-            <Text style={styles.markAllRead}>Mark all read</Text>
+            <Text style={styles.markAllText}>Mark all read</Text>
           </TouchableOpacity>
         )}
       </View>
 
-      {/* Unread Count */}
-      {unreadCount > 0 && (
-        <View style={styles.unreadBanner}>
-          <Text style={styles.unreadText}>
-            {unreadCount} unread notification{unreadCount === 1 ? '' : 's'}
-          </Text>
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Loading notifications...</Text>
         </View>
+      ) : (
+        <FlatList
+          data={notifications}
+          renderItem={renderNotification}
+          keyExtractor={(item) => item.id}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+          contentContainerStyle={styles.listContainer}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Ionicons name="notifications-off-outline" size={64} color="#ccc" />
+              <Text style={styles.emptyText}>No notifications yet</Text>
+              <Text style={styles.emptySubtext}>
+                You'll see important updates here
+              </Text>
+            </View>
+          }
+        />
       )}
-
-      <ScrollView
-        style={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        showsVerticalScrollIndicator={false}
-      >
-        {notifications.length > 0 ? (
-          notifications.map((notification) => {
-            const icon = getNotificationIcon(notification.type);
-            
-            return (
-              <TouchableOpacity
-                key={notification.id}
-                style={[
-                  styles.notificationCard,
-                  !notification.read && styles.unreadCard
-                ]}
-                onPress={() => markAsRead(notification.id)}
-              >
-                <View style={styles.notificationContent}>
-                  <View style={styles.notificationHeader}>
-                    <View style={[styles.iconContainer, { backgroundColor: icon.color + '20' }]}>
-                      <Ionicons name={icon.name as any} size={20} color={icon.color} />
-                    </View>
-                    
-                    <View style={styles.notificationInfo}>
-                      <Text style={[
-                        styles.notificationTitle,
-                        !notification.read && styles.unreadTitle
-                      ]}>
-                        {notification.title}
-                      </Text>
-                      <Text style={styles.notificationTime}>
-                        {getRelativeTime(notification.timestamp)}
-                      </Text>
-                    </View>
-                    
-                    {!notification.read && (
-                      <View style={styles.unreadDot} />
-                    )}
-                  </View>
-                  
-                  <Text style={styles.notificationMessage}>
-                    {notification.message}
-                  </Text>
-                </View>
-                
-                <TouchableOpacity
-                  style={styles.deleteButton}
-                  onPress={() => deleteNotification(notification.id)}
-                >
-                  <Ionicons name="close" size={20} color="#999" />
-                </TouchableOpacity>
-              </TouchableOpacity>
-            );
-          })
-        ) : (
-          <View style={styles.emptyState}>
-            <Ionicons name="notifications-outline" size={64} color="#ccc" />
-            <Text style={styles.emptyTitle}>No Notifications</Text>
-            <Text style={styles.emptyText}>
-              You&apos;re all caught up! Notifications about charging sessions, reservations, and updates will appear here.
-            </Text>
-          </View>
-        )}
-
-        <View style={{ height: 100 }} />
-      </ScrollView>
     </View>
   );
 }
@@ -234,32 +273,19 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333',
   },
-  markAllRead: {
+  markAllText: {
     fontSize: 14,
     color: '#007AFF',
     fontWeight: '500',
   },
-  unreadBanner: {
-    backgroundColor: '#E8F4FD',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-  },
-  unreadText: {
-    fontSize: 14,
-    color: '#007AFF',
-    fontWeight: '500',
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 20,
+  listContainer: {
+    padding: 20,
   },
   notificationCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
-    marginVertical: 6,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+    marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -269,7 +295,7 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
-  unreadCard: {
+  unreadNotification: {
     borderLeftWidth: 4,
     borderLeftColor: '#007AFF',
   },
@@ -278,38 +304,25 @@ const styles = StyleSheet.create({
   },
   notificationHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 8,
   },
   iconContainer: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
   },
-  notificationInfo: {
+  notificationText: {
     flex: 1,
   },
   notificationTitle: {
     fontSize: 16,
-    fontWeight: '500',
-    color: '#333',
-    marginBottom: 2,
-  },
-  unreadTitle: {
     fontWeight: '600',
-  },
-  notificationTime: {
-    fontSize: 12,
-    color: '#666',
-  },
-  unreadDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#007AFF',
+    color: '#333',
+    marginBottom: 4,
   },
   notificationMessage: {
     fontSize: 14,
@@ -318,24 +331,36 @@ const styles = StyleSheet.create({
   },
   deleteButton: {
     padding: 4,
-    marginLeft: 8,
   },
-  emptyState: {
+  notificationTime: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'right',
+  },
+  loadingContainer: {
+    flex: 1,
     alignItems: 'center',
-    paddingVertical: 80,
-    paddingHorizontal: 40,
+    justifyContent: 'center',
   },
-  emptyTitle: {
-    fontSize: 20,
+  loadingText: {
+    fontSize: 16,
+    color: '#666',
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  emptyText: {
+    fontSize: 18,
     fontWeight: '600',
-    color: '#333',
+    color: '#666',
     marginTop: 16,
     marginBottom: 8,
   },
-  emptyText: {
+  emptySubtext: {
     fontSize: 14,
-    color: '#666',
+    color: '#999',
     textAlign: 'center',
-    lineHeight: 20,
   },
 });

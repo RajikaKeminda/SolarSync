@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { apiService } from '../../services/api';
+import { realTimeService } from '../../services/realTimeService';
 import { useAuthStore, useChargingStore, useVehicleStore } from '../../store';
 import { ChargingSession, Reservation } from '../../types';
 import { calculateEstimatedRange, getBatteryColor } from '../../utils/helpers';
@@ -31,6 +32,7 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [activeSession, setActiveSession] = useState<ChargingSession | null>(null);
   const [upcomingReservations, setLocalUpcomingReservations] = useState<Reservation[]>([]);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
 
   // Fetch all data from APIs
   const fetchData = useCallback(async () => {
@@ -40,35 +42,70 @@ export default function HomeScreen() {
     }
 
     try {
-      // Fetch vehicles
-      const vehiclesResponse = await apiService.getVehicles();
-      if (vehiclesResponse.success && vehiclesResponse.data) {
-        setVehicles(vehiclesResponse.data);
-        setSelectedVehicle(vehiclesResponse.data.find(v => v.isDefault) || null);
-      }
+      // Fetch dashboard data
+      const dashboardResponse = await apiService.getDashboardData(user.id);
+      if (dashboardResponse.success && dashboardResponse.data) {
+        const dashboardData = dashboardResponse.data;
+        
+        // Set vehicles
+        if (dashboardData.vehicles) {
+          setVehicles(dashboardData.vehicles);
+          setSelectedVehicle(dashboardData.selectedVehicle || null);
+        }
 
-      // Fetch active charging session
-      const activeSessionResponse = await apiService.getActiveSession();
-      if (activeSessionResponse.success && activeSessionResponse.data) {
-        if (activeSessionResponse.data.length > 0) {
-          setActiveSession(activeSessionResponse.data[0]);
-          setActiveSessions(activeSessionResponse.data);
+        // Set active sessions
+        if (dashboardData.activeSessions) {
+          if (dashboardData.activeSessions.length > 0) {
+            setActiveSession(dashboardData.activeSessions[0]);
+            setActiveSessions(dashboardData.activeSessions);
+          } else {
+            setActiveSession(null);
+            setActiveSessions([]);
+          }
+        }
+
+        // Set upcoming reservations
+        if (dashboardData.upcomingReservations) {
+          setLocalUpcomingReservations(dashboardData.upcomingReservations);
+        }
+
+        // Set notifications
+        if (dashboardData.notifications) {
+          const unreadCount = dashboardData.notifications.filter((n: any) => !n.isRead).length;
+          setUnreadNotifications(unreadCount);
+        }
+      } else {
+        // Fallback to individual API calls if dashboard fails
+        // Fetch vehicles
+        const vehiclesResponse = await apiService.getVehicles();
+        if (vehiclesResponse.success && vehiclesResponse.data) {
+          setVehicles(vehiclesResponse.data);
+          setSelectedVehicle(vehiclesResponse.data.find(v => v.isDefault) || null);
+        }
+
+        // Fetch active charging session
+        const activeSessionResponse = await apiService.getActiveSession();
+        if (activeSessionResponse.success && activeSessionResponse.data) {
+          if (activeSessionResponse.data.length > 0) {
+            setActiveSession(activeSessionResponse.data[0]);
+            setActiveSessions(activeSessionResponse.data);
+          } else {
+            setActiveSession(null);
+            setActiveSessions([]);
+          }
         } else {
           setActiveSession(null);
           setActiveSessions([]);
         }
-      } else {
-        setActiveSession(null);
-        setActiveSessions([]);
-      }
 
-      // Fetch user reservations
-      const reservationsResponse = await apiService.getReservationsByUserId(user.id);
-      if (reservationsResponse.success && reservationsResponse.data) {
-        const confirmedReservations = reservationsResponse.data.filter(
-          (r: Reservation) => r.status === 'confirmed' && new Date(r.scheduledStartTime) > new Date()
-        );
-        setLocalUpcomingReservations(confirmedReservations);
+        // Fetch user reservations
+        const reservationsResponse = await apiService.getReservationsByUserId(user.id);
+        if (reservationsResponse.success && reservationsResponse.data) {
+          const confirmedReservations = reservationsResponse.data.filter(
+            (r: Reservation) => r.status === 'confirmed' && new Date(r.scheduledStartTime) > new Date()
+          );
+          setLocalUpcomingReservations(confirmedReservations);
+        }
       }
 
     } catch (error) {
@@ -89,6 +126,38 @@ export default function HomeScreen() {
       fetchData();
     }, [fetchData])
   );
+
+  // Set up real-time updates
+  useEffect(() => {
+    if (!user?.id) return;
+
+    // Start polling for updates
+    realTimeService.startPolling(user.id);
+
+    // Subscribe to charging session updates
+    const unsubscribeCharging = realTimeService.subscribe('charging_session', (update) => {
+      if (update.action === 'updated' || update.action === 'created') {
+        // Refresh data when charging session updates
+        fetchData();
+      }
+    });
+
+    // Subscribe to notification updates
+    const unsubscribeNotifications = realTimeService.subscribe('notification', (update) => {
+      if (update.action === 'created') {
+        // Update unread count
+        setUnreadNotifications(prev => prev + 1);
+        console.log('New notification:', update.data);
+      }
+    });
+
+    // Cleanup on unmount
+    return () => {
+      unsubscribeCharging();
+      unsubscribeNotifications();
+      realTimeService.stopPolling();
+    };
+  }, [user?.id, fetchData]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -123,9 +192,13 @@ export default function HomeScreen() {
           onPress={() => router.push('/notifications')}
         >
           <Ionicons name="notifications-outline" size={24} color="#333" />
-          <View style={styles.notificationBadge}>
-            <Text style={styles.notificationBadgeText}>2</Text>
-          </View>
+          {unreadNotifications > 0 && (
+            <View style={styles.notificationBadge}>
+              <Text style={styles.notificationBadgeText}>
+                {unreadNotifications > 99 ? '99+' : unreadNotifications}
+              </Text>
+            </View>
+          )}
         </TouchableOpacity>
       </View>
 

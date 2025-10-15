@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   Dimensions,
   RefreshControl,
@@ -13,7 +13,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useAnalyticsStore, useVehicleStore } from '../../store';
+import { apiService } from '../../services/api';
+import { useAnalyticsStore, useVehicleStore, useAuthStore } from '../../store';
 import { calculateCarbonSavings, formatEnergy, formatPrice } from '../../utils/helpers';
 
 const { width } = Dimensions.get('window');
@@ -21,19 +22,40 @@ const { width } = Dimensions.get('window');
 export default function AnalyticsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user } = useAuthStore();
   const { analytics } = useAnalyticsStore();
   const { selectedVehicle } = useVehicleStore();
   
   const [refreshing, setRefreshing] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState<'week' | 'month' | 'year'>('month');
 
-  const onRefresh = React.useCallback(() => {
-    setRefreshing(true);
-    // TODO: Fetch latest analytics data
-    setTimeout(() => setRefreshing(false), 2000);
-  }, []);
+  const [analyticsData, setAnalyticsData] = useState<any>(null);
 
-  // Mock data for demonstration
+  const fetchAnalytics = useCallback(async () => {
+    if (!user?.id) return;
+
+    try {
+      const response = await apiService.getAnalytics(user.id, selectedPeriod);
+      if (response.success && response.data) {
+        setAnalyticsData(response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching analytics:', error);
+    }
+  }, [user?.id, selectedPeriod]);
+
+  const onRefresh = React.useCallback(async () => {
+    setRefreshing(true);
+    await fetchAnalytics();
+    setRefreshing(false);
+  }, [fetchAnalytics]);
+
+  // Load analytics data
+  useEffect(() => {
+    fetchAnalytics();
+  }, [fetchAnalytics]);
+
+  // Mock data for demonstration (fallback)
   const mockAnalytics = {
     totalChargingSessions: 24,
     totalEnergyConsumed: 156.7,
@@ -48,7 +70,7 @@ export default function AnalyticsScreen() {
     favoriteStations: ['PowerStation Downtown', 'GreenCharge Mall', 'FastCharge Highway']
   };
 
-  const currentAnalytics = analytics || mockAnalytics;
+  const currentAnalytics = analyticsData || analytics || mockAnalytics;
 
   const StatCard = ({ icon, title, value, subtitle, color = '#007AFF' }: {
     icon: string;
@@ -86,7 +108,7 @@ export default function AnalyticsScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Analytics</Text>
-        <TouchableOpacity onPress={() => router.push('/analytics/detailed')}>
+        <TouchableOpacity onPress={() => router.push('/profile')}>
           <Ionicons name="settings-outline" size={24} color="#007AFF" />
         </TouchableOpacity>
       </View>
@@ -246,7 +268,7 @@ export default function AnalyticsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Favorite Stations</Text>
           
-          {currentAnalytics.favoriteStations.map((station, index) => (
+          {currentAnalytics.favoriteStations.map((station: string, index: number) => (
             <View key={index} style={styles.favoriteStationCard}>
               <View style={styles.stationRank}>
                 <Text style={styles.rankNumber}>{index + 1}</Text>

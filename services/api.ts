@@ -380,12 +380,40 @@ class ApiService {
   }
 
   // Analytics APIs
-  async getAnalytics(): Promise<ApiResponse<Analytics>> {
-    return this.request('/analytics');
+  async getAnalytics(userId?: string, period?: string): Promise<ApiResponse<Analytics>> {
+    const params = new URLSearchParams();
+    if (userId) params.append('userId', userId);
+    if (period) params.append('period', period);
+    return this.request(`/analytics?${params}`);
   }
 
-  async getMonthlyReport(month: string): Promise<ApiResponse<any>> {
-    return this.request(`/analytics/monthly/${month}`);
+  async getBusinessAnalytics(ownerId: string, period?: string): Promise<ApiResponse<Analytics>> {
+    const params = new URLSearchParams();
+    params.append('ownerId', ownerId);
+    if (period) params.append('period', period);
+    return this.request(`/analytics/business?${params}`);
+  }
+
+  async getMonthlyReport(month: string, userId?: string, ownerId?: string): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams();
+    if (userId) params.append('userId', userId);
+    if (ownerId) params.append('ownerId', ownerId);
+    return this.request(`/analytics/monthly/${month}?${params}`);
+  }
+
+  async getDashboardSummary(userId?: string, ownerId?: string): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams();
+    if (userId) params.append('userId', userId);
+    if (ownerId) params.append('ownerId', ownerId);
+    return this.request(`/analytics/dashboard?${params}`);
+  }
+
+  async getUsageTrends(userId?: string, ownerId?: string, period?: string): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams();
+    if (userId) params.append('userId', userId);
+    if (ownerId) params.append('ownerId', ownerId);
+    if (period) params.append('period', period);
+    return this.request(`/analytics/trends?${params}`);
   }
 
   // AI APIs
@@ -419,16 +447,45 @@ class ApiService {
   }
 
   // Notification APIs
-  async updateNotificationSettings(settings: any): Promise<ApiResponse<void>> {
-    return this.request('/notifications/settings', {
+  async getNotifications(userId: string, limit?: number, offset?: number): Promise<ApiResponse<any[]>> {
+    const params = new URLSearchParams();
+    params.append('userId', userId);
+    if (limit) params.append('limit', limit.toString());
+    if (offset) params.append('offset', offset.toString());
+    return this.request(`/notifications?${params}`);
+  }
+
+  async getUnreadNotificationsCount(userId: string): Promise<ApiResponse<{ unreadCount: number }>> {
+    return this.request(`/notifications/unread?userId=${userId}`);
+  }
+
+  async markNotificationAsRead(notificationId: string): Promise<ApiResponse<any>> {
+    return this.request(`/notifications/${notificationId}/read`, {
       method: 'PUT',
-      body: JSON.stringify(settings),
     });
   }
 
-  async sendTestNotification(): Promise<ApiResponse<void>> {
-    return this.request('/notifications/test', {
-      method: 'POST',
+  async markAllNotificationsAsRead(userId: string): Promise<ApiResponse<{ updatedCount: number }>> {
+    return this.request('/notifications/read-all', {
+      method: 'PUT',
+      body: JSON.stringify({ userId }),
+    });
+  }
+
+  async deleteNotification(notificationId: string): Promise<ApiResponse<void>> {
+    return this.request(`/notifications/${notificationId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getNotificationSettings(userId: string): Promise<ApiResponse<any>> {
+    return this.request(`/notifications/settings?userId=${userId}`);
+  }
+
+  async updateNotificationSettings(userId: string, settings: any): Promise<ApiResponse<any>> {
+    return this.request('/notifications/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ userId, settings }),
     });
   }
 
@@ -453,6 +510,73 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify(data),
     });
+  }
+
+  // Dashboard APIs
+  async getDashboardData(userId?: string, ownerId?: string): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams();
+    if (userId) params.append('userId', userId);
+    if (ownerId) params.append('ownerId', ownerId);
+    return this.request(`/dashboard?${params}`);
+  }
+
+  async getDashboardQuickStats(userId?: string, ownerId?: string, period?: string): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams();
+    if (userId) params.append('userId', userId);
+    if (ownerId) params.append('ownerId', ownerId);
+    if (period) params.append('period', period);
+    return this.request(`/dashboard/quick-stats?${params}`);
+  }
+
+  async getDashboardNotifications(userId: string, limit?: number): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams();
+    params.append('userId', userId);
+    if (limit) params.append('limit', limit.toString());
+    return this.request(`/dashboard/notifications?${params}`);
+  }
+
+  async getDashboardUpcoming(userId?: string, ownerId?: string, limit?: number): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams();
+    if (userId) params.append('userId', userId);
+    if (ownerId) params.append('ownerId', ownerId);
+    if (limit) params.append('limit', limit.toString());
+    return this.request(`/dashboard/upcoming?${params}`);
+  }
+
+  async getDashboardTrends(userId?: string, ownerId?: string, period?: string): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams();
+    if (userId) params.append('userId', userId);
+    if (ownerId) params.append('ownerId', ownerId);
+    if (period) params.append('period', period);
+    return this.request(`/dashboard/trends?${params}`);
+  }
+
+  async getStationStatus(ownerId: string): Promise<ApiResponse<any>> {
+    return this.request(`/dashboard/station-status?ownerId=${ownerId}`);
+  }
+
+  // Enhanced Charging Session APIs
+  async getDashboardActiveSessions(userId?: string, ownerId?: string): Promise<ApiResponse<ChargingSession[]>> {
+    const params = new URLSearchParams();
+    if (userId) params.append('userId', userId);
+    if (ownerId) params.append('ownerId', ownerId);
+    return this.request(`/charging-sessions/dashboard/active?${params}`);
+  }
+
+  async getDashboardRecentSessions(userId?: string, ownerId?: string, limit?: number): Promise<ApiResponse<ChargingSession[]>> {
+    const params = new URLSearchParams();
+    if (userId) params.append('userId', userId);
+    if (ownerId) params.append('ownerId', ownerId);
+    if (limit) params.append('limit', limit.toString());
+    return this.request(`/charging-sessions/dashboard/recent?${params}`);
+  }
+
+  async getDashboardStats(userId?: string, ownerId?: string, period?: string): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams();
+    if (userId) params.append('userId', userId);
+    if (ownerId) params.append('ownerId', ownerId);
+    if (period) params.append('period', period);
+    return this.request(`/charging-sessions/dashboard/stats?${params}`);
   }
 
   // Upload APIs

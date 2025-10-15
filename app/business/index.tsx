@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
     Dimensions,
     RefreshControl,
@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { apiService } from '../../services/api';
 import { useAuthStore } from '../../store';
 import { formatEnergy, formatPrice } from '../../utils/helpers';
 
@@ -25,13 +26,33 @@ export default function BusinessDashboard() {
   
   const [refreshing, setRefreshing] = useState(false);
 
-  const onRefresh = React.useCallback(() => {
-    setRefreshing(true);
-    // TODO: Fetch latest business data
-    setTimeout(() => setRefreshing(false), 2000);
-  }, []);
+  const [businessData, setBusinessData] = useState<any>(null);
 
-  // Mock data for business dashboard
+  const fetchBusinessData = useCallback(async () => {
+    if (!user?.id) return;
+
+    try {
+      const response = await apiService.getDashboardData(undefined, user.id);
+      if (response.success && response.data) {
+        setBusinessData(response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching business data:', error);
+    }
+  }, [user?.id]);
+
+  const onRefresh = React.useCallback(async () => {
+    setRefreshing(true);
+    await fetchBusinessData();
+    setRefreshing(false);
+  }, [fetchBusinessData]);
+
+  // Load business data
+  useEffect(() => {
+    fetchBusinessData();
+  }, [fetchBusinessData]);
+
+  // Mock data for business dashboard (fallback)
   const mockData = {
     totalStations: 3,
     totalSessions: 156,
@@ -51,6 +72,8 @@ export default function BusinessDashboard() {
       { month: 'Mar', sessions: 51, revenue: 896.23 },
     ]
   };
+
+  const currentData = businessData || mockData;
 
   const StatCard = ({ icon, title, value, subtitle, color = '#007AFF', onPress }: {
     icon: string;
@@ -115,7 +138,7 @@ export default function BusinessDashboard() {
             <StatCard
               icon="business"
               title="Total Stations"
-              value={mockData.totalStations.toString()}
+              value={currentData.quickStats?.totalStations?.toString() || currentData.totalStations?.toString() || '0'}
               subtitle="Active locations"
               color="#007AFF"
               onPress={() => router.push('/business/stations')}
@@ -124,7 +147,7 @@ export default function BusinessDashboard() {
             <StatCard
               icon="flash"
               title="Active Sessions"
-              value={mockData.activeChargingSessions.toString()}
+              value={currentData.quickStats?.activeSessions?.toString() || currentData.activeChargingSessions?.toString() || '0'}
               subtitle="Currently charging"
               color="#4CAF50"
             />
@@ -132,7 +155,7 @@ export default function BusinessDashboard() {
             <StatCard
               icon="wallet"
               title="Monthly Revenue"
-              value={formatPrice(mockData.monthlyRevenue)}
+              value={formatPrice(currentData.quickStats?.totalRevenue || currentData.monthlyRevenue || 0)}
               subtitle="This month"
               color="#FF9800"
             />
@@ -140,7 +163,7 @@ export default function BusinessDashboard() {
             <StatCard
               icon="time"
               title="Avg. Duration"
-              value={`${mockData.averageSessionDuration}m`}
+              value={`${currentData.quickStats?.averageDuration || currentData.averageSessionDuration || 0}m`}
               subtitle="Per session"
               color="#9C27B0"
             />
@@ -154,7 +177,7 @@ export default function BusinessDashboard() {
               <View>
                 <Text style={styles.revenueTitle}>Total Revenue</Text>
                 <Text style={styles.revenueAmount}>
-                  {formatPrice(mockData.totalRevenue)}
+                  {formatPrice(currentData.quickStats?.totalRevenue || currentData.totalRevenue || 0)}
                 </Text>
               </View>
               <View style={styles.revenueGrowth}>
@@ -164,7 +187,7 @@ export default function BusinessDashboard() {
             </View>
             
             <Text style={styles.revenueSubtitle}>
-              From {mockData.totalSessions} charging sessions
+              From {currentData.quickStats?.totalSessions || currentData.totalSessions || 0} charging sessions
             </Text>
           </View>
         </View>
@@ -217,7 +240,7 @@ export default function BusinessDashboard() {
             </TouchableOpacity>
           </View>
           
-          {mockData.recentSessions.map((session) => (
+          {(currentData.recentSessions || mockData.recentSessions).map((session) => (
             <View key={session.id} style={styles.sessionCard}>
               <View style={styles.sessionHeader}>
                 <Text style={styles.sessionStation}>{session.stationName}</Text>
