@@ -17,11 +17,11 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { apiService } from '../../../services/api';
-import { useAuthStore } from '../../../store';
-import { ChargingPortType, ChargingStation } from '../../../types';
-import { CHARGING_PORT_TYPES } from '../../../utils/constants';
-import { isValidEmail } from '../../../utils/helpers';
+import { apiService } from '../../services/api';
+import { useAuthStore } from '../../store';
+import { ChargingPortType, ChargingStation } from '../../types';
+import { CHARGING_PORT_TYPES } from '../../utils/constants';
+import { isValidEmail } from '../../utils/helpers';
 
 interface PortConfiguration {
   type: ChargingPortType;

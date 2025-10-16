@@ -91,9 +91,9 @@ export default function RootLayout() {
             // Station Owner screens
             <>
               <Stack.Screen name="business" />
-              <Stack.Screen name="business/station/add" options={{ presentation: 'modal' }} />
-              <Stack.Screen name="business/station/edit" options={{ presentation: 'modal' }} />
-              <Stack.Screen name="business/station/details" />
+              <Stack.Screen name="station/add" options={{ presentation: 'modal' }} />
+              <Stack.Screen name="station/edit" options={{ presentation: 'modal' }} />
+              <Stack.Screen name="station/details" />
               <Stack.Screen name="business/settings" />
               <Stack.Screen name="business/profile/edit" options={{ presentation: 'modal' }} />
               <Stack.Screen name="notifications" />

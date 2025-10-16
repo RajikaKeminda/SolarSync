@@ -263,7 +263,7 @@ export default function BusinessDashboard() {
           <View style={styles.actionGrid}>
             <TouchableOpacity 
               style={styles.actionButton}
-              onPress={() => router.push('/business/station/add')}
+              onPress={() => router.push('/station/add')}
             >
               <Ionicons name="add-circle" size={24} color="#007AFF" />
               <Text style={styles.actionText}>Add Station</Text>
@@ -352,7 +352,7 @@ export default function BusinessDashboard() {
               <TouchableOpacity 
                 key={station.id} 
                 style={styles.stationCard}
-                onPress={() => router.push(`/business/station/edit?id=${station.id}`)}
+                onPress={() => router.push(`/station/edit?id=${station.id}`)}
               >
                 <View style={styles.stationHeader}>
                   <Text style={styles.stationName}>{station.name}</Text>

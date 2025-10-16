@@ -64,7 +64,7 @@ export default function StationsScreen() {
 
 
   const handleAddStation = () => {
-    router.push('/business/station/add');
+    router.push('/station/add');
   };
 
   const handleStationPress = (stationId: string) => {
@@ -247,7 +247,7 @@ export default function StationsScreen() {
                 <View style={styles.stationActions}>
                   <TouchableOpacity 
                     style={styles.actionButton}
-                    onPress={() => router.push(`/business/station/edit?id=${station.id}`)}
+                    onPress={() => router.push(`/station/edit?id=${station.id}`)}
                   >
                     <Ionicons name="settings" size={16} color="#007AFF" />
                     <Text style={styles.actionButtonText}>Settings</Text>
