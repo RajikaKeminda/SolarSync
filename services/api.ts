@@ -42,9 +42,9 @@ class ApiService {
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
     const url = `${this.baseURL}${endpoint}`;
-    const headers: HeadersInit = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...options.headers,
+      ...(options.headers as Record<string, string>),
     };
 
     if (this.token) {
@@ -414,6 +414,42 @@ class ApiService {
     if (ownerId) params.append('ownerId', ownerId);
     if (period) params.append('period', period);
     return this.request(`/analytics/trends?${params}`);
+  }
+
+  // Enhanced Business Analytics APIs
+  async getBusinessMetrics(ownerId: string, period?: string): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams();
+    params.append('ownerId', ownerId);
+    if (period) params.append('period', period);
+    return this.request(`/analytics/business/metrics?${params}`);
+  }
+
+  async getRevenueTrends(ownerId: string, period?: string): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams();
+    params.append('ownerId', ownerId);
+    if (period) params.append('period', period);
+    return this.request(`/analytics/business/revenue?${params}`);
+  }
+
+  async getStationPerformance(ownerId: string, period?: string): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams();
+    params.append('ownerId', ownerId);
+    if (period) params.append('period', period);
+    return this.request(`/analytics/business/station-performance?${params}`);
+  }
+
+  async getPeakHoursAnalysis(ownerId: string, period?: string): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams();
+    params.append('ownerId', ownerId);
+    if (period) params.append('period', period);
+    return this.request(`/analytics/business/peak-hours?${params}`);
+  }
+
+  async getCustomerInsights(ownerId: string, period?: string): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams();
+    params.append('ownerId', ownerId);
+    if (period) params.append('period', period);
+    return this.request(`/analytics/business/customer-insights?${params}`);
   }
 
   // AI APIs

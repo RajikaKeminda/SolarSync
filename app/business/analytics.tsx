@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
     Dimensions,
     RefreshControl,
@@ -13,22 +12,109 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { apiService } from '../../services/api';
+import { useAuthStore } from '../../store';
 import { formatEnergy, formatPrice } from '../../utils/helpers';
 
 const { width } = Dimensions.get('window');
 
 export default function BusinessAnalyticsScreen() {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user } = useAuthStore();
   
   const [refreshing, setRefreshing] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState<'week' | 'month' | 'year'>('month');
+  const [loading, setLoading] = useState(false);
+  
+  // Analytics data states
+  const [metricsData, setMetricsData] = useState<any>(null);
+  const [revenueData, setRevenueData] = useState<any>(null);
+  const [stationPerformanceData, setStationPerformanceData] = useState<any>(null);
+  const [peakHoursData, setPeakHoursData] = useState<any>(null);
+  const [customerInsightsData, setCustomerInsightsData] = useState<any>(null);
 
-  const onRefresh = React.useCallback(() => {
+  const fetchAnalyticsData = useCallback(async () => {
+    if (!user?.id) {
+      console.warn('User not authenticated, using mock data');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const [metricsResponse, revenueResponse, stationResponse, peakHoursResponse, customerResponse] = await Promise.all([
+        apiService.getBusinessMetrics(user.id, selectedPeriod),
+        apiService.getRevenueTrends(user.id, selectedPeriod),
+        apiService.getStationPerformance(user.id, selectedPeriod),
+        apiService.getPeakHoursAnalysis(user.id, selectedPeriod),
+        apiService.getCustomerInsights(user.id, selectedPeriod)
+      ]);
+
+      if (metricsResponse.success) setMetricsData(metricsResponse.data);
+      if (revenueResponse.success) setRevenueData(revenueResponse.data);
+      if (stationResponse.success) setStationPerformanceData(stationResponse.data);
+      if (peakHoursResponse.success) setPeakHoursData(peakHoursResponse.data);
+      if (customerResponse.success) setCustomerInsightsData(customerResponse.data);
+    } catch (error) {
+      console.error('Error fetching analytics data:', error);
+      // Continue with mock data on error
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.id, selectedPeriod]);
+
+  const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
-    // TODO: Fetch latest analytics data
-    setTimeout(() => setRefreshing(false), 2000);
-  }, []);
+    await fetchAnalyticsData();
+    setRefreshing(false);
+  }, [fetchAnalyticsData]);
+
+  // Load analytics data when component mounts or period changes
+  useEffect(() => {
+    fetchAnalyticsData();
+  }, [fetchAnalyticsData]);
+
+  // Helper functions to get current data with fallback to mock data
+  const getCurrentMetrics = () => {
+    if (metricsData) {
+      return {
+        totalRevenue: metricsData.totalRevenue,
+        totalSessions: metricsData.totalSessions,
+        totalEnergy: metricsData.totalEnergy,
+        averageSessionDuration: metricsData.averageSessionDuration,
+        growthRate: metricsData.growthRate,
+        customerSatisfaction: metricsData.customerSatisfaction,
+        topPerformingStation: metricsData.topPerformingStation,
+      };
+    }
+    return mockAnalytics;
+  };
+
+  const getCurrentRevenueData = () => {
+    return revenueData?.monthlyData || mockAnalytics.monthlyData;
+  };
+
+  const getCurrentStationPerformance = () => {
+    return stationPerformanceData?.stations || mockAnalytics.stationPerformance;
+  };
+
+  const getCurrentPeakHours = () => {
+    return peakHoursData?.hourlyData || mockAnalytics.peakHoursData;
+  };
+
+  const getCurrentCustomerInsights = () => {
+    if (customerInsightsData) {
+      return {
+        customerSatisfaction: customerInsightsData.customerSatisfaction || mockAnalytics.customerSatisfaction,
+        repeatCustomers: customerInsightsData.repeatCustomers || 89,
+        growthRate: customerInsightsData.growthRate || mockAnalytics.growthRate,
+      };
+    }
+    return {
+      customerSatisfaction: mockAnalytics.customerSatisfaction,
+      repeatCustomers: 89,
+      growthRate: mockAnalytics.growthRate,
+    };
+  };
 
   // Mock analytics data
   const mockAnalytics = {
@@ -160,22 +246,27 @@ export default function BusinessAnalyticsScreen() {
       >
         {/* Key Metrics */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Key Performance Metrics</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Key Performance Metrics</Text>
+            {loading && (
+              <Text style={styles.loadingText}>Loading...</Text>
+            )}
+          </View>
           
           <View style={styles.metricsGrid}>
             <MetricCard
               icon="wallet"
               title="Total Revenue"
-              value={formatPrice(mockAnalytics.totalRevenue)}
-              subtitle="This month"
-              trend={mockAnalytics.growthRate}
+              value={formatPrice(getCurrentMetrics().totalRevenue)}
+              subtitle={`This ${selectedPeriod}`}
+              trend={getCurrentMetrics().growthRate}
               color="#4CAF50"
             />
             
             <MetricCard
               icon="flash"
               title="Total Sessions"
-              value={mockAnalytics.totalSessions.toString()}
+              value={getCurrentMetrics().totalSessions.toString()}
               subtitle="Charging sessions"
               trend={8.3}
               color="#007AFF"
@@ -184,7 +275,7 @@ export default function BusinessAnalyticsScreen() {
             <MetricCard
               icon="battery-charging"
               title="Energy Delivered"
-              value={formatEnergy(mockAnalytics.totalEnergy)}
+              value={formatEnergy(getCurrentMetrics().totalEnergy)}
               subtitle="Total energy"
               trend={15.7}
               color="#FF9800"
@@ -193,7 +284,7 @@ export default function BusinessAnalyticsScreen() {
             <MetricCard
               icon="time"
               title="Avg. Duration"
-              value={`${mockAnalytics.averageSessionDuration}m`}
+              value={`${getCurrentMetrics().averageSessionDuration}m`}
               subtitle="Per session"
               trend={-2.1}
               color="#9C27B0"
@@ -207,20 +298,24 @@ export default function BusinessAnalyticsScreen() {
           
           <View style={styles.chartContainer}>
             <View style={styles.chartHeader}>
-              <Text style={styles.chartTitle}>Monthly Revenue</Text>
-              <Text style={styles.chartSubtitle}>Last 3 months</Text>
+              <Text style={styles.chartTitle}>
+                {selectedPeriod === 'week' ? 'Weekly' : selectedPeriod === 'month' ? 'Monthly' : 'Yearly'} Revenue
+              </Text>
+              <Text style={styles.chartSubtitle}>
+                {selectedPeriod === 'week' ? 'Last 4 weeks' : selectedPeriod === 'month' ? 'Last 3 months' : 'Last 12 months'}
+              </Text>
             </View>
             
             <View style={styles.chartPlaceholder}>
               <View style={styles.chartBars}>
-                {mockAnalytics.monthlyData.map((data, index) => (
+                {getCurrentRevenueData().map((data: any, index: number) => (
                   <View key={index} style={styles.chartBarContainer}>
                     <View 
                       style={[
                         styles.chartBar,
                         { 
                           height: (data.revenue / 20000) * 100,
-                          backgroundColor: index === mockAnalytics.monthlyData.length - 1 ? '#007AFF' : '#E0E0E0'
+                          backgroundColor: index === getCurrentRevenueData().length - 1 ? '#007AFF' : '#E0E0E0'
                         }
                       ]}
                     />
@@ -237,39 +332,47 @@ export default function BusinessAnalyticsScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Station Performance</Text>
           
-          {mockAnalytics.stationPerformance.map((station, index) => (
-            <View key={index} style={styles.stationPerformanceCard}>
-              <View style={styles.stationHeader}>
-                <Text style={styles.stationName}>{station.name}</Text>
-                <Text style={styles.stationRevenue}>{formatPrice(station.revenue)}</Text>
-              </View>
-              
-              <View style={styles.stationMetrics}>
-                <View style={styles.stationMetric}>
-                  <Text style={styles.stationMetricLabel}>Sessions</Text>
-                  <Text style={styles.stationMetricValue}>{station.sessions}</Text>
+          {getCurrentStationPerformance().length > 0 ? (
+            getCurrentStationPerformance().map((station: any, index: number) => (
+              <View key={index} style={styles.stationPerformanceCard}>
+                <View style={styles.stationHeader}>
+                  <Text style={styles.stationName}>{station.name}</Text>
+                  <Text style={styles.stationRevenue}>{formatPrice(station.revenue)}</Text>
                 </View>
                 
-                <View style={styles.stationMetric}>
-                  <Text style={styles.stationMetricLabel}>Utilization</Text>
-                  <Text style={styles.stationMetricValue}>{station.utilization}%</Text>
+                <View style={styles.stationMetrics}>
+                  <View style={styles.stationMetric}>
+                    <Text style={styles.stationMetricLabel}>Sessions</Text>
+                    <Text style={styles.stationMetricValue}>{station.sessions}</Text>
+                  </View>
+                  
+                  <View style={styles.stationMetric}>
+                    <Text style={styles.stationMetricLabel}>Utilization</Text>
+                    <Text style={styles.stationMetricValue}>{station.utilization}%</Text>
+                  </View>
+                </View>
+                
+                <View style={styles.utilizationBar}>
+                  <View 
+                    style={[
+                      styles.utilizationFill,
+                      { 
+                        width: `${station.utilization}%`,
+                        backgroundColor: station.utilization > 70 ? '#4CAF50' : 
+                                      station.utilization > 40 ? '#FF9800' : '#F44336'
+                      }
+                    ]}
+                  />
                 </View>
               </View>
-              
-              <View style={styles.utilizationBar}>
-                <View 
-                  style={[
-                    styles.utilizationFill,
-                    { 
-                      width: `${station.utilization}%`,
-                      backgroundColor: station.utilization > 70 ? '#4CAF50' : 
-                                    station.utilization > 40 ? '#FF9800' : '#F44336'
-                    }
-                  ]}
-                />
-              </View>
+            ))
+          ) : (
+            <View style={styles.emptyState}>
+              <Ionicons name="analytics-outline" size={48} color="#ccc" />
+              <Text style={styles.emptyStateText}>No station data available</Text>
+              <Text style={styles.emptyStateSubtext}>Add stations to see performance metrics</Text>
             </View>
-          ))}
+          )}
         </View>
 
         {/* Peak Hours Analysis */}
@@ -280,7 +383,7 @@ export default function BusinessAnalyticsScreen() {
             <Text style={styles.peakHoursTitle}>Usage by Hour</Text>
             
             <View style={styles.peakHoursChart}>
-              {mockAnalytics.peakHoursData.map((hourData, index) => (
+              {getCurrentPeakHours().map((hourData: any, index: number) => (
                 <View key={index} style={styles.hourBar}>
                   <View 
                     style={[
@@ -301,7 +404,7 @@ export default function BusinessAnalyticsScreen() {
             
             <Text style={styles.peakHoursInsight}>
               Peak usage: 6 PM - 8 PM (Average: {Math.round(
-                mockAnalytics.peakHoursData.slice(18, 21).reduce((sum, h) => sum + h.sessions, 0) / 3
+                getCurrentPeakHours().slice(18, 21).reduce((sum: number, h: any) => sum + h.sessions, 0) / 3
               )} sessions/hour)
             </Text>
           </View>
@@ -314,19 +417,19 @@ export default function BusinessAnalyticsScreen() {
           <View style={styles.insightsContainer}>
             <View style={styles.insightCard}>
               <Ionicons name="star" size={24} color="#FFB800" />
-              <Text style={styles.insightValue}>{mockAnalytics.customerSatisfaction}</Text>
+              <Text style={styles.insightValue}>{getCurrentCustomerInsights().customerSatisfaction}</Text>
               <Text style={styles.insightLabel}>Customer Rating</Text>
             </View>
             
             <View style={styles.insightCard}>
               <Ionicons name="people" size={24} color="#007AFF" />
-              <Text style={styles.insightValue}>89%</Text>
+              <Text style={styles.insightValue}>{getCurrentCustomerInsights().repeatCustomers}%</Text>
               <Text style={styles.insightLabel}>Repeat Customers</Text>
             </View>
             
             <View style={styles.insightCard}>
               <Ionicons name="trending-up" size={24} color="#4CAF50" />
-              <Text style={styles.insightValue}>+{mockAnalytics.growthRate}%</Text>
+              <Text style={styles.insightValue}>+{getCurrentCustomerInsights().growthRate}%</Text>
               <Text style={styles.insightLabel}>Monthly Growth</Text>
             </View>
           </View>
@@ -340,9 +443,9 @@ export default function BusinessAnalyticsScreen() {
               <Text style={styles.topStationTitle}>Top Performing Station</Text>
             </View>
             
-            <Text style={styles.topStationName}>{mockAnalytics.topPerformingStation}</Text>
+            <Text style={styles.topStationName}>{getCurrentMetrics().topPerformingStation}</Text>
             <Text style={styles.topStationDescription}>
-              Highest revenue and customer satisfaction this month
+              Highest revenue and customer satisfaction this {selectedPeriod}
             </Text>
           </View>
         </View>
@@ -415,6 +518,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333',
     marginBottom: 16,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  loadingText: {
+    fontSize: 12,
+    color: '#007AFF',
+    fontWeight: '500',
   },
   metricsGrid: {
     flexDirection: 'row',
@@ -689,5 +803,32 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     lineHeight: 20,
+  },
+  emptyState: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  emptyStateText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginTop: 12,
+  },
+  emptyStateSubtext: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
+    textAlign: 'center',
   },
 });
