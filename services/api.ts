@@ -300,9 +300,10 @@ class ApiService {
     return this.request(`/charging-sessions/${sessionId}`);
   }
 
-  async stopChargingSession(sessionId: string): Promise<ApiResponse<ChargingSession>> {
+  async stopChargingSession(sessionId: string, energyDelivered: number, cost: number): Promise<ApiResponse<ChargingSession>> {
     return this.request(`/charging-sessions/${sessionId}/end`, {
       method: 'PATCH',
+      body: JSON.stringify({ energyDelivered, cost }),
     });
   }
 

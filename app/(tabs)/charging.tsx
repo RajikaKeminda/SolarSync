@@ -97,7 +97,8 @@ export default function ChargingScreen() {
     }, [fetchChargingData])
   );
 
-  const handleStopCharging = async (sessionId: string) => {
+  const handleStopCharging = async (session: ChargingSession) => {
+    const sessionId = session.id;
     Alert.alert(
       'Stop Charging',
       'Are you sure you want to stop the current charging session?',
@@ -108,7 +109,22 @@ export default function ChargingScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const response = await apiService.stopChargingSession(sessionId);
+              const sessionStart = new Date(session.startTime).getTime();
+              const now = Date.now();
+              const elapsedMinutes = Math.floor((now - sessionStart) / 1000 / 60);
+              const minKwh = Math.max(1, Math.floor(elapsedMinutes * 1.2)); // at least 1kWh, assume ~1.2kW/min
+              // Generate a seeded random value so it's deterministic per session, but still "random enough"
+              function seededRandom(seed: number) {
+                const x = Math.sin(seed) * 10000;
+                return x - Math.floor(x);
+              }
+              const randomFactor = 0.8 + seededRandom(sessionStart) * 0.4; // between 0.8 and 1.2
+              const batteryCapacity = session.vehicleId && typeof session.vehicleId === 'object' ? session.vehicleId.batteryCapacity : 75;
+              const maxEnergy = Math.max(1, Math.min(batteryCapacity, Math.floor(batteryCapacity * 0.8)));
+              const energyDelivered = Math.min(maxEnergy, Math.floor(minKwh * randomFactor));
+              const baseRate = typeof session.stationId === 'object' && session.stationId && session.stationId.pricing ? session.stationId.pricing.baseRate : 0.35;
+              const cost = Number((energyDelivered * baseRate).toFixed(2));
+              const response = await apiService.stopChargingSession(sessionId, energyDelivered, cost);
               
               if (response.success && response.data) {
                 // Update local store
@@ -303,7 +319,7 @@ export default function ChargingScreen() {
           
           <TouchableOpacity 
             style={styles.stopChargingButton}
-            onPress={() => handleStopCharging(session.id)}
+            onPress={() => handleStopCharging(session)}
           >
             <Text style={styles.stopChargingText}>Stop Charging</Text>
           </TouchableOpacity>

@@ -74,7 +74,8 @@ export default function SessionsScreen() {
     return session.status === selectedFilter;
   });
 
-  const handleSessionAction = async (sessionId: string, action: 'stop' | 'support') => {
+  const handleSessionAction = async (session: ChargingSession, action: 'stop' | 'support') => {
+    const sessionId = session.id;
     if (action === 'stop') {
       Alert.alert(
         'Stop Session',
@@ -86,7 +87,23 @@ export default function SessionsScreen() {
             style: 'destructive',
             onPress: async () => {
               try {
-                const response = await apiService.stopChargingSession(sessionId);
+
+                const sessionStart = new Date(session.startTime).getTime();
+                const now = Date.now();
+                const elapsedMinutes = Math.floor((now - sessionStart) / 1000 / 60);
+                const minKwh = Math.max(1, Math.floor(elapsedMinutes * 1.2)); // at least 1kWh, assume ~1.2kW/min
+                // Generate a seeded random value so it's deterministic per session, but still "random enough"
+                function seededRandom(seed: number) {
+                  const x = Math.sin(seed) * 10000;
+                  return x - Math.floor(x);
+                }
+                const randomFactor = 0.8 + seededRandom(sessionStart) * 0.4; // between 0.8 and 1.2
+                const batteryCapacity = session.vehicleId && typeof session.vehicleId === 'object' ? session.vehicleId.batteryCapacity : 75;
+                const maxEnergy = Math.max(1, Math.min(batteryCapacity, Math.floor(batteryCapacity * 0.8)));
+                const energyDelivered = Math.min(maxEnergy, Math.floor(minKwh * randomFactor));
+                const baseRate = typeof session.stationId === 'object' && session.stationId && session.stationId.pricing ? session.stationId.pricing.baseRate : 0.35;
+                const cost = Number((energyDelivered * baseRate).toFixed(2));
+                const response = await apiService.stopChargingSession(sessionId, energyDelivered, cost);
 
                 if (response.success && response.data) {
                   // Update local sessions
@@ -98,6 +115,7 @@ export default function SessionsScreen() {
                     )
                   );
 
+                  await apiService.updateReservation(session.reservationId as string, { status: 'completed' });
                   Alert.alert(
                     'Session Stopped',
                     `Session completed. Final cost: ${formatPrice(response.data.cost)}`,
@@ -268,14 +286,14 @@ export default function SessionsScreen() {
                     {session.status === 'active' && (
                       <TouchableOpacity
                         style={styles.actionIcon}
-                        onPress={() => handleSessionAction(session.id, 'stop')}
+                        onPress={() => handleSessionAction(session, 'stop')}
                       >
                         <Ionicons name="stop-circle" size={20} color="#F44336" />
                       </TouchableOpacity>
                     )}
                     <TouchableOpacity
                       style={styles.actionIcon}
-                      onPress={() => handleSessionAction(session.id, 'support')}
+                      onPress={() => handleSessionAction(session, 'support')}
                     >
                       <Ionicons name="help-circle-outline" size={20} color="#007AFF" />
                     </TouchableOpacity>
