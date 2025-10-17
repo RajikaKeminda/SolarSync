@@ -460,6 +460,12 @@ class ApiService {
     return this.request(`/analytics/ai-suggestions?${params}`);
   }
 
+  async getAIUserRecommendations(userId: string): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams();
+    params.append('userId', userId);
+    return this.request(`/analytics/ai-user-recommendations?${params}`);
+  }
+
   // AI APIs
   async getAITripSuggestions(data: {
     tripDescription: string;
