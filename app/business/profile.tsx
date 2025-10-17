@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     Alert,
     Image,
+    RefreshControl,
     ScrollView,
     StyleSheet,
     Switch,
@@ -25,6 +26,44 @@ export default function BusinessProfileScreen() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [autoReportsEnabled, setAutoReportsEnabled] = useState(true);
   const [maintenanceAlertsEnabled, setMaintenanceAlertsEnabled] = useState(true);
+  
+  // Business overview data
+  const [businessStats, setBusinessStats] = useState({
+    totalStations: 0,
+    totalSessions: 0,
+    monthlyRevenue: 0,
+    customerRating: 0
+  });
+  const [loading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchBusinessStats = useCallback(async () => {
+    if (!user?.id) return;
+
+    try {
+      const response = await apiService.getBusinessMetrics(user.id, 'month');
+      if (response.success && response.data) {
+        setBusinessStats({
+          totalStations: response.data.totalStations || 0,
+          totalSessions: response.data.totalSessions || 0,
+          monthlyRevenue: response.data.totalRevenue || 0,
+          customerRating: response.data.customerSatisfaction || 0
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching business stats:', error);
+    }
+  }, [user?.id]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchBusinessStats();
+    setRefreshing(false);
+  }, [fetchBusinessStats]);
+
+  useEffect(() => {
+    fetchBusinessStats();
+  }, [fetchBusinessStats]);
 
   const handleSignOut = () => {
     Alert.alert(
@@ -55,7 +94,7 @@ export default function BusinessProfileScreen() {
   };
 
   const handleBusinessSettings = () => {
-    router.push('/business/settings');
+    Alert.alert('Coming Soon', 'Business settings will be available soon');
   };
 
   const handleSupport = () => {
@@ -68,14 +107,6 @@ export default function BusinessProfileScreen() {
 
   const handleTermsOfService = () => {
     Alert.alert('Terms of Service', 'Opening terms of service...');
-  };
-
-  // Mock business stats
-  const businessStats = {
-    totalStations: 3,
-    totalSessions: 347,
-    monthlyRevenue: 15689.45,
-    customerRating: 4.6
   };
 
   const ProfileItem = ({ 
@@ -129,12 +160,18 @@ export default function BusinessProfileScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
         {/* Profile Header */}
         <View style={styles.profileHeader}>
           <View style={styles.profileImageContainer}>
             <Image
-              source={{ uri: user?.profilePicture || 'https://via.placeholder.com/80x80/007AFF/FFFFFF?text=B' }}
+              source={{ uri: (user as any)?.profilePicture || 'https://via.placeholder.com/80x80/007AFF/FFFFFF?text=B' }}
               style={styles.profileImage}
               defaultSource={require('../../assets/images/icon.png')}
             />
@@ -163,22 +200,30 @@ export default function BusinessProfileScreen() {
           
           <View style={styles.statsGrid}>
             <View style={styles.statCard}>
-              <Text style={styles.statValue}>{businessStats.totalStations}</Text>
+              <Text style={styles.statValue}>
+                {loading ? '...' : businessStats.totalStations}
+              </Text>
               <Text style={styles.statLabel}>Stations</Text>
             </View>
             
             <View style={styles.statCard}>
-              <Text style={styles.statValue}>{businessStats.totalSessions}</Text>
+              <Text style={styles.statValue}>
+                {loading ? '...' : businessStats.totalSessions}
+              </Text>
               <Text style={styles.statLabel}>Sessions</Text>
             </View>
             
             <View style={styles.statCard}>
-              <Text style={styles.statValue}>${businessStats.monthlyRevenue.toLocaleString()}</Text>
+              <Text style={styles.statValue}>
+                {loading ? '...' : `$${businessStats.monthlyRevenue.toLocaleString()}`}
+              </Text>
               <Text style={styles.statLabel}>Revenue</Text>
             </View>
             
             <View style={styles.statCard}>
-              <Text style={styles.statValue}>{businessStats.customerRating}★</Text>
+              <Text style={styles.statValue}>
+                {loading ? '...' : `${businessStats.customerRating}★`}
+              </Text>
               <Text style={styles.statLabel}>Rating</Text>
             </View>
           </View>
