@@ -1,4 +1,4 @@
-import { useSignIn } from '@clerk/clerk-expo';
+import { useSignIn, useAuth } from '@clerk/clerk-expo';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
@@ -22,7 +22,8 @@ import { isValidEmail } from '../../utils/helpers';
 export default function LoginScreen() {
   const router = useRouter();
   const { setAuth, setLoading, isLoading } = useAuthStore();
-  const { signIn, setActive } = useSignIn()
+  const { signIn, setActive } = useSignIn();
+  const { signOut } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -43,11 +44,21 @@ export default function LoginScreen() {
     try {
       if (!signIn) {
         Alert.alert('Error', 'Failed to login');
+        setLoading(false);
         return;
       }
 
-      const { createdSessionId } = await signIn.create({ identifier: email, password })
-      await setActive({ session: createdSessionId })
+      // Sign out any existing session first
+      try {
+        await signOut();
+      } catch {
+        // Ignore sign out errors, might not have a session
+        console.log('No existing session to sign out');
+      }
+
+      // Now create a new session
+      const { createdSessionId } = await signIn.create({ identifier: email, password });
+      await setActive({ session: createdSessionId });
 
       const response = await apiService.login(email, password);
       
@@ -58,8 +69,13 @@ export default function LoginScreen() {
       } else {
         Alert.alert('Login Failed', response.error || 'Invalid credentials');
       }
-    } catch (error) {
-      Alert.alert('Error', 'An unexpected error occurred. Please try again.');
+    } catch (error: any) {
+      console.error('Login error:', error);
+      if (error.errors && error.errors[0]?.code === 'session_exists') {
+        Alert.alert('Error', 'Please sign out first before logging in again.');
+      } else {
+        Alert.alert('Error', error.errors?.[0]?.message || 'An unexpected error occurred. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -105,7 +121,7 @@ export default function LoginScreen() {
       setTimeout(() => {
         useAuthStore.getState().clearAuth();
       }, 100);
-    } catch (error) {
+    } catch {
       Alert.alert('Error', 'Failed to clear data');
     }
   };
@@ -177,7 +193,7 @@ export default function LoginScreen() {
             </Text>
           </TouchableOpacity>
 
-          <View style={styles.divider}>
+          {/* <View style={styles.divider}>
             <View style={styles.dividerLine} />
             <Text style={styles.dividerText}>or try demo</Text>
             <View style={styles.dividerLine} />
@@ -197,8 +213,8 @@ export default function LoginScreen() {
           >
             <Ionicons name="business" size={20} color="#007AFF" />
             <Text style={styles.demoButtonText}>Demo as Station Owner</Text>
-          </TouchableOpacity>
-        </View>
+          </TouchableOpacity> */}
+        </View> 
 
         <View style={styles.footer}>
           <Text style={styles.footerText}>
@@ -209,14 +225,14 @@ export default function LoginScreen() {
           </Text>
           
           {/* Development Debug Button */}
-          {__DEV__ && (
+          {/* {__DEV__ && (
             <TouchableOpacity 
               style={styles.debugButton}
               onPress={clearAllData}
             >
               <Text style={styles.debugButtonText}>🔧 Clear All Data (Dev)</Text>
             </TouchableOpacity>
-          )}
+          )} */}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

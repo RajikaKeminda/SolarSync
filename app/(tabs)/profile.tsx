@@ -41,7 +41,7 @@ export default function ProfileScreen() {
             try {
               await signOut();
               await apiService.logout();
-              apiService.clearToken();
+              await apiService.clearToken();
               await logout();
             } catch (error) {
               console.error('Logout error:', error);

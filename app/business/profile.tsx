@@ -77,12 +77,11 @@ export default function BusinessProfileScreen() {
           onPress: async () => {
             try {
               await apiService.logout();
-              apiService.clearToken();
-              await logout();
+              await apiService.clearToken();
             } catch (error) {
               console.error('Logout error:', error);
-              await logout(); // Clear auth even if API call fails
             }
+            await logout(); // Clear auth even if API call fails
           },
         },
       ]
@@ -90,7 +89,7 @@ export default function BusinessProfileScreen() {
   };
 
   const handleEditProfile = () => {
-    router.push('/business/profile/edit');
+    router.push('/profile/business/edit');
   };
 
   const handleBusinessSettings = () => {
