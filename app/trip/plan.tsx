@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     KeyboardAvoidingView,
     Platform,
@@ -15,64 +16,37 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useLocationStore, useVehicleStore } from '../../store';
+import { useAuthStore, useLocationStore, useVehicleStore } from '../../store';
 import { formatDistance, formatPrice, formatTime } from '../../utils/helpers';
+import apiService from '../../services/api';
+import {
+  extractLocationsFromDescription,
+  geocodeLocation,
+  GeocodedLocation,
+  getRouteSegments,
+} from '../../services/aiTripService';
+import { ChargingStation } from '../../types';
+
+interface TripPlanResult {
+  locations: GeocodedLocation[];
+  stations: ChargingStation[];
+  totalDistance: number;
+}
 
 export default function TripPlanScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { selectedVehicle } = useVehicleStore();
   const { currentLocation } = useLocationStore();
+  const { user } = useAuthStore();
   
   const [tripDescription, setTripDescription] = useState('');
   const [startLocation, setStartLocation] = useState('');
   const [endLocation, setEndLocation] = useState('');
   const [isPlanning, setIsPlanning] = useState(false);
-  const [tripPlan, setTripPlan] = useState<any>(null);
+  const [tripPlan, setTripPlan] = useState<TripPlanResult | null>(null);
   const [planningMode, setPlanningMode] = useState<'ai' | 'manual'>('ai');
-
-  // Mock AI response
-  const mockTripPlan = {
-    route: {
-      distance: 450,
-      duration: 280, // minutes
-      totalCost: 65.40,
-      carbonSaved: 42.5
-    },
-    chargingStops: [
-      {
-        station: {
-          id: '1',
-          name: 'Highway Rest Stop Charger',
-          address: 'Highway 101, Mile 150',
-          distance: 180,
-          pricing: { baseRate: 0.32 }
-        },
-        arrivalBattery: 35,
-        chargeTo: 85,
-        chargingTime: 35,
-        cost: 28.50
-      },
-      {
-        station: {
-          id: '2',
-          name: 'Downtown FastCharge',
-          address: 'City Center Plaza',
-          distance: 420,
-          pricing: { baseRate: 0.38 }
-        },
-        arrivalBattery: 25,
-        chargeTo: 80,
-        chargingTime: 45,
-        cost: 36.90
-      }
-    ],
-    tips: [
-      'Pre-condition your battery during the last 30 minutes before each charging stop',
-      'Consider charging to 85% instead of 100% to save time',
-      'Weather conditions may affect your range by up to 15%'
-    ]
-  };
+  const [loadingStage, setLoadingStage] = useState('');
 
   const handleAIPlan = async () => {
     if (!tripDescription.trim()) {
@@ -86,12 +60,106 @@ export default function TripPlanScreen() {
     }
 
     setIsPlanning(true);
+    setTripPlan(null);
 
-    // Simulate AI processing
-    setTimeout(() => {
-      setTripPlan(mockTripPlan);
+    try {
+      // Step 1: Extract locations using Gemini AI
+      setLoadingStage('Analyzing your trip description with AI...');
+      const extractedLocations = await extractLocationsFromDescription(tripDescription);
+
+      if (!extractedLocations.start || !extractedLocations.destination) {
+        Alert.alert(
+          'Incomplete Information',
+          'Could not identify start and destination locations. Please be more specific.'
+        );
+        setIsPlanning(false);
+        return;
+      }
+
+      // Step 2: Geocode locations
+      setLoadingStage('Finding exact locations...');
+      const locationsToGeocode = [
+        extractedLocations.start,
+        ...extractedLocations.stops,
+        extractedLocations.destination,
+      ].filter(Boolean) as string[];
+
+      const geocodedLocations: GeocodedLocation[] = [];
+      for (const locationName of locationsToGeocode) {
+        try {
+          const geocoded = await geocodeLocation(locationName);
+          geocodedLocations.push(geocoded);
+        } catch (error) {
+          console.error(`Failed to geocode ${locationName}:`, error);
+          Alert.alert('Location Error', `Could not find location: ${locationName}`);
+          setIsPlanning(false);
+          return;
+        }
+      }
+
+      // Step 3: Find charging stations along the route
+      setLoadingStage('Searching for charging stations...');
+      const allStations: ChargingStation[] = [];
+      
+      // Get route segments
+      const segments = getRouteSegments(geocodedLocations);
+      
+      // Search for stations near each segment
+      for (const segment of segments) {
+        // Search in a radius around the midpoint of each segment
+        const midLat = (segment.from.latitude + segment.to.latitude) / 2;
+        const midLng = (segment.from.longitude + segment.to.longitude) / 2;
+        
+        // Adjust search radius based on segment distance (in km)
+        const searchRadius = Math.min(Math.max(segment.distance * 0.5, 20), 100);
+        
+        try {
+          const response = await apiService.getNearbyStations(
+            { latitude: midLat, longitude: midLng },
+            searchRadius
+          );
+          
+          if (response.success && response.data) {
+            // Filter out duplicates and inactive stations
+            const newStations = response.data.filter(
+              (station: ChargingStation) =>
+                station.isActive &&
+                station.availablePorts > 0 &&
+                !allStations.some((s) => s.id === station.id)
+            );
+            allStations.push(...newStations);
+          }
+        } catch (error) {
+          console.error('Error fetching stations:', error);
+        }
+      }
+
+      // Step 4: Calculate total distance
+      const totalDistance = segments.reduce((sum, seg) => sum + seg.distance, 0);
+
+      setLoadingStage('');
+      setTripPlan({
+        locations: geocodedLocations,
+        stations: allStations,
+        totalDistance,
+      });
+
+      if (allStations.length === 0) {
+        Alert.alert(
+          'No Stations Found',
+          'No charging stations found along your route. Try a different route or check back later.'
+        );
+      }
+    } catch (error: any) {
+      console.error('Error planning trip:', error);
+      Alert.alert(
+        'Planning Failed',
+        error.message || 'Failed to plan your trip. Please try again.'
+      );
+    } finally {
       setIsPlanning(false);
-    }, 3000);
+      setLoadingStage('');
+    }
   };
 
   const handleManualPlan = async () => {
@@ -101,12 +169,75 @@ export default function TripPlanScreen() {
     }
 
     setIsPlanning(true);
+    setTripPlan(null);
 
-    // Simulate manual planning
-    setTimeout(() => {
-      setTripPlan(mockTripPlan);
+    try {
+      // Step 1: Geocode locations
+      setLoadingStage('Finding exact locations...');
+      const geocodedLocations: GeocodedLocation[] = [];
+
+      const start = await geocodeLocation(startLocation);
+      geocodedLocations.push(start);
+
+      const end = await geocodeLocation(endLocation);
+      geocodedLocations.push(end);
+
+      // Step 2: Find charging stations along the route
+      setLoadingStage('Searching for charging stations...');
+      const segments = getRouteSegments(geocodedLocations);
+      const allStations: ChargingStation[] = [];
+
+      for (const segment of segments) {
+        const midLat = (segment.from.latitude + segment.to.latitude) / 2;
+        const midLng = (segment.from.longitude + segment.to.longitude) / 2;
+        const searchRadius = Math.min(Math.max(segment.distance * 0.5, 20), 100);
+
+        try {
+          const response = await apiService.getNearbyStations(
+            { latitude: midLat, longitude: midLng },
+            searchRadius
+          );
+
+          if (response.success && response.data) {
+            const newStations = response.data.filter(
+              (station: ChargingStation) =>
+                station.isActive &&
+                station.availablePorts > 0 &&
+                !allStations.some((s) => s.id === station.id)
+            );
+            allStations.push(...newStations);
+          }
+        } catch (error) {
+          console.error('Error fetching stations:', error);
+        }
+      }
+
+      // Step 3: Calculate total distance
+      const totalDistance = segments.reduce((sum, seg) => sum + seg.distance, 0);
+
+      setLoadingStage('');
+      setTripPlan({
+        locations: geocodedLocations,
+        stations: allStations,
+        totalDistance,
+      });
+
+      if (allStations.length === 0) {
+        Alert.alert(
+          'No Stations Found',
+          'No charging stations found along your route. Try a different route or check back later.'
+        );
+      }
+    } catch (error: any) {
+      console.error('Error planning trip:', error);
+      Alert.alert(
+        'Planning Failed',
+        error.message || 'Failed to plan your trip. Please try again.'
+      );
+    } finally {
       setIsPlanning(false);
-    }, 2000);
+      setLoadingStage('');
+    }
   };
 
   const handleBookStation = (stationId: string) => {
@@ -128,12 +259,13 @@ export default function TripPlanScreen() {
         <Text style={styles.inputLabel}>Describe your trip</Text>
         <TextInput
           style={styles.tripInput}
-          placeholder="e.g., I'm driving from San Francisco to Los Angeles tomorrow morning with my Tesla Model 3. I want to stop for lunch and need to arrive by 6 PM."
+          placeholder="e.g., I'm traveling from Colombo to Kandy with a stop at Kurunegala"
           value={tripDescription}
           onChangeText={setTripDescription}
           multiline
           numberOfLines={4}
           textAlignVertical="top"
+          placeholderTextColor="#999"
         />
       </View>
 
@@ -144,8 +276,10 @@ export default function TripPlanScreen() {
       >
         {isPlanning ? (
           <View style={styles.loadingContainer}>
-            <Ionicons name="sync" size={20} color="#fff" />
-            <Text style={styles.planButtonText}>AI is planning your route...</Text>
+            <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.planButtonText}>
+              {loadingStage || 'Planning your route...'}
+            </Text>
           </View>
         ) : (
           <Text style={styles.planButtonText}>Plan with AI</Text>
@@ -198,8 +332,10 @@ export default function TripPlanScreen() {
       >
         {isPlanning ? (
           <View style={styles.loadingContainer}>
-            <Ionicons name="sync" size={20} color="#fff" />
-            <Text style={styles.planButtonText}>Planning route...</Text>
+            <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.planButtonText}>
+              {loadingStage || 'Planning route...'}
+            </Text>
           </View>
         ) : (
           <Text style={styles.planButtonText}>Plan Route</Text>
@@ -208,113 +344,133 @@ export default function TripPlanScreen() {
     </View>
   );
 
-  const renderTripPlan = () => (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>Your Trip Plan</Text>
-      
-      {/* Route Summary */}
-      <View style={styles.summaryCard}>
-        <View style={styles.summaryHeader}>
-          <Ionicons name="map" size={20} color="#007AFF" />
-          <Text style={styles.summaryTitle}>Route Summary</Text>
-        </View>
-        
-        <View style={styles.summaryStats}>
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{formatDistance(tripPlan.route.distance)}</Text>
-            <Text style={styles.statLabel}>Distance</Text>
-          </View>
-          
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{formatTime(tripPlan.route.duration)}</Text>
-            <Text style={styles.statLabel}>Duration</Text>
-          </View>
-          
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{formatPrice(tripPlan.route.totalCost)}</Text>
-            <Text style={styles.statLabel}>Charging Cost</Text>
-          </View>
-          
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{tripPlan.route.carbonSaved.toFixed(1)} kg</Text>
-            <Text style={styles.statLabel}>CO₂ Saved</Text>
-          </View>
-        </View>
-      </View>
+  const renderTripPlan = () => {
+    if (!tripPlan) return null;
 
-      {/* Charging Stops */}
-      <View style={styles.chargingStops}>
-        <Text style={styles.stopsTitle}>Charging Stops</Text>
+    return (
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Your Trip Plan</Text>
         
-        {tripPlan.chargingStops.map((stop: any, index: number) => (
-          <View key={index} style={styles.stopCard}>
-            <View style={styles.stopHeader}>
-              <View style={styles.stopNumber}>
-                <Text style={styles.stopNumberText}>{index + 1}</Text>
+        {/* Route Summary */}
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryHeader}>
+            <Ionicons name="map" size={20} color="#007AFF" />
+            <Text style={styles.summaryTitle}>Route Summary</Text>
+          </View>
+          
+          <View style={styles.routeLocations}>
+            {tripPlan.locations.map((location, index) => (
+              <View key={index} style={styles.locationItem}>
+                <Ionicons 
+                  name={index === 0 ? 'location' : index === tripPlan.locations.length - 1 ? 'flag' : 'ellipse'} 
+                  size={16} 
+                  color={index === 0 ? '#4CAF50' : index === tripPlan.locations.length - 1 ? '#F44336' : '#FF9800'} 
+                />
+                <Text style={styles.locationName}>{location.name}</Text>
               </View>
-              <View style={styles.stopInfo}>
-                <Text style={styles.stopName}>{stop.station.name}</Text>
-                <Text style={styles.stopAddress}>{stop.station.address}</Text>
-              </View>
-              <TouchableOpacity 
-                style={styles.bookStopButton}
-                onPress={() => handleBookStation(stop.station.id)}
-              >
-                <Text style={styles.bookStopText}>Book</Text>
-              </TouchableOpacity>
+            ))}
+          </View>
+          
+          <View style={styles.summaryStats}>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{formatDistance(tripPlan.totalDistance)}</Text>
+              <Text style={styles.statLabel}>Total Distance</Text>
             </View>
             
-            <View style={styles.stopDetails}>
-              <View style={styles.stopDetail}>
-                <Text style={styles.stopDetailLabel}>Arrival Battery</Text>
-                <Text style={styles.stopDetailValue}>{stop.arrivalBattery}%</Text>
-              </View>
-              
-              <View style={styles.stopDetail}>
-                <Text style={styles.stopDetailLabel}>Charge To</Text>
-                <Text style={styles.stopDetailValue}>{stop.chargeTo}%</Text>
-              </View>
-              
-              <View style={styles.stopDetail}>
-                <Text style={styles.stopDetailLabel}>Charging Time</Text>
-                <Text style={styles.stopDetailValue}>{stop.chargingTime} min</Text>
-              </View>
-              
-              <View style={styles.stopDetail}>
-                <Text style={styles.stopDetailLabel}>Cost</Text>
-                <Text style={styles.stopDetailValue}>{formatPrice(stop.cost)}</Text>
-              </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{tripPlan.stations.length}</Text>
+              <Text style={styles.statLabel}>Stations Found</Text>
             </View>
           </View>
-        ))}
-      </View>
+        </View>
 
-      {/* Tips */}
-      <View style={styles.tipsSection}>
-        <Text style={styles.tipsTitle}>Pro Tips</Text>
-        
-        {tripPlan.tips.map((tip: string, index: number) => (
-          <View key={index} style={styles.tipItem}>
+        {/* Charging Stations */}
+        <View style={styles.chargingStops}>
+          <Text style={styles.stopsTitle}>Available Charging Stations</Text>
+          
+          {tripPlan.stations.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="search-outline" size={48} color="#999" />
+              <Text style={styles.emptyStateText}>No charging stations found along this route</Text>
+            </View>
+          ) : (
+            tripPlan.stations.map((station, index) => (
+              <View key={station.id} style={styles.stopCard}>
+                <View style={styles.stopHeader}>
+                  <View style={styles.stopNumber}>
+                    <Text style={styles.stopNumberText}>{index + 1}</Text>
+                  </View>
+                  <View style={styles.stopInfo}>
+                    <Text style={styles.stopName}>{station.name}</Text>
+                    <Text style={styles.stopAddress}>{station.address}</Text>
+                    {station.averageRating > 0 && (
+                      <View style={styles.ratingContainer}>
+                        <Ionicons name="star" size={12} color="#FFB800" />
+                        <Text style={styles.ratingText}>
+                          {station.averageRating.toFixed(1)} ({station.totalReviews})
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  <TouchableOpacity 
+                    style={styles.bookStopButton}
+                    onPress={() => handleBookStation(station.id)}
+                  >
+                    <Text style={styles.bookStopText}>Book</Text>
+                  </TouchableOpacity>
+                </View>
+                
+                <View style={styles.stopDetails}>
+                  <View style={styles.stopDetail}>
+                    <Text style={styles.stopDetailLabel}>Available Ports</Text>
+                    <Text style={styles.stopDetailValue}>{station.availablePorts}/{station.totalPorts}</Text>
+                  </View>
+                  
+                  <View style={styles.stopDetail}>
+                    <Text style={styles.stopDetailLabel}>Base Rate</Text>
+                    <Text style={styles.stopDetailValue}>{formatPrice(station.pricing.baseRate)}/kWh</Text>
+                  </View>
+                  
+                  <View style={styles.stopDetail}>
+                    <Text style={styles.stopDetailLabel}>Status</Text>
+                    <Text style={[styles.stopDetailValue, { color: station.isActive ? '#4CAF50' : '#F44336' }]}>
+                      {station.isActive ? 'Active' : 'Inactive'}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ))
+          )}
+        </View>
+
+        {/* Tips */}
+        <View style={styles.tipsSection}>
+          <Text style={styles.tipsTitle}>Pro Tips</Text>
+          
+          <View style={styles.tipItem}>
             <Ionicons name="bulb" size={16} color="#FF9800" />
-            <Text style={styles.tipText}>{tip}</Text>
+            <Text style={styles.tipText}>
+              Plan your charging stops during meal breaks or rest stops to save time
+            </Text>
           </View>
-        ))}
+          
+          <View style={styles.tipItem}>
+            <Ionicons name="bulb" size={16} color="#FF9800" />
+            <Text style={styles.tipText}>
+              Check station availability before starting your journey
+            </Text>
+          </View>
+          
+          <View style={styles.tipItem}>
+            <Ionicons name="bulb" size={16} color="#FF9800" />
+            <Text style={styles.tipText}>
+              Consider weather conditions - they may affect your range by up to 15%
+            </Text>
+          </View>
+        </View>
       </View>
-
-      {/* Action Buttons */}
-      <View style={styles.actionButtons}>
-        <TouchableOpacity style={styles.saveButton}>
-          <Ionicons name="bookmark" size={20} color="#007AFF" />
-          <Text style={styles.saveButtonText}>Save Trip</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.shareButton}>
-          <Ionicons name="share" size={20} color="#007AFF" />
-          <Text style={styles.shareButtonText}>Share</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+    );
+  };
 
   return (
     <KeyboardAvoidingView 
@@ -564,9 +720,23 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333',
   },
+  routeLocations: {
+    marginBottom: 16,
+  },
+  locationItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  locationName: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+  },
   summaryStats: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'space-around',
   },
   statItem: {
     alignItems: 'center',
@@ -580,6 +750,27 @@ const styles = StyleSheet.create({
   statLabel: {
     fontSize: 12,
     color: '#666',
+  },
+  ratingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+  },
+  ratingText: {
+    fontSize: 12,
+    color: '#666',
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  emptyStateText: {
+    fontSize: 14,
+    color: '#999',
+    marginTop: 12,
+    textAlign: 'center',
   },
   chargingStops: {
     marginBottom: 20,
