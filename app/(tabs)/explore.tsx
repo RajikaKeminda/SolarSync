@@ -131,6 +131,22 @@ export default function ExploreScreen() {
   const [loading, setLoading] = useState(true);
   const [stations, setStations] = useState<ChargingStation[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [sentimentStats, setSentimentStats] = useState<{[key: string]: any}>({});
+
+  // Fetch sentiment stats for a station
+  const fetchSentimentStats = useCallback(async (stationId: string) => {
+    try {
+      const response = await apiService.getStationSentimentStats(stationId);
+      if (response.success && response.data) {
+        setSentimentStats(prev => ({
+          ...prev,
+          [stationId]: response.data
+        }));
+      }
+    } catch (error) {
+      console.error(`Error fetching sentiment stats for station ${stationId}:`, error);
+    }
+  }, []);
 
   // Fetch all stations from API
   const fetchAllStations = useCallback(async () => {
@@ -138,6 +154,10 @@ export default function ExploreScreen() {
       const response = await apiService.getAllStations();
       if (response.success && response.data) {
         setStations(response.data);
+        // Fetch sentiment stats for first 10 stations
+        response.data.slice(0, 10).forEach((station: ChargingStation) => {
+          fetchSentimentStats(station.id);
+        });
       } else {
         console.error('Failed to fetch stations:', response.error);
         // Fall back to mock data if API fails
@@ -150,7 +170,7 @@ export default function ExploreScreen() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fetchSentimentStats]);
 
   // Search stations using API
   const searchStations = useCallback(async (query: string) => {
@@ -260,6 +280,16 @@ export default function ExploreScreen() {
     
     const status = getStationStatus(station);
     const isCompatible = selectedVehicle ? isVehicleCompatible(selectedVehicle, station) : true;
+    const stationSentiment = sentimentStats[station.id];
+    const positivePercentage = stationSentiment?.positivePercentage || 0;
+    const hasReviews = stationSentiment?.total > 0;
+
+    // Fetch sentiment stats for this station if not already loaded
+    React.useEffect(() => {
+      if (!sentimentStats[station.id]) {
+        fetchSentimentStats(station.id);
+      }
+    }, [station.id]);
 
     return (
       <TouchableOpacity 
@@ -277,6 +307,24 @@ export default function ExploreScreen() {
               <Ionicons name="star" size={12} color="#FFB800" />
               <Text style={styles.rating}>{station.averageRating}</Text>
             </View>
+            {hasReviews && (
+              <View style={[
+                styles.sentimentBadge, 
+                { backgroundColor: positivePercentage >= 70 ? '#E8F5E9' : positivePercentage >= 40 ? '#FFF8E1' : '#FFEBEE' }
+              ]}>
+                <Ionicons 
+                  name={positivePercentage >= 70 ? 'happy' : positivePercentage >= 40 ? 'remove-circle' : 'sad'} 
+                  size={10} 
+                  color={positivePercentage >= 70 ? '#4CAF50' : positivePercentage >= 40 ? '#FF9800' : '#F44336'} 
+                />
+                <Text style={[
+                  styles.sentimentText,
+                  { color: positivePercentage >= 70 ? '#4CAF50' : positivePercentage >= 40 ? '#FF9800' : '#F44336' }
+                ]}>
+                  {positivePercentage}%
+                </Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -786,6 +834,19 @@ const styles = StyleSheet.create({
   emptyButtonText: {
     color: '#fff',
     fontSize: 16,
+    fontWeight: '600',
+  },
+  sentimentBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 10,
+    marginTop: 4,
+    gap: 3,
+  },
+  sentimentText: {
+    fontSize: 10,
     fontWeight: '600',
   },
 });

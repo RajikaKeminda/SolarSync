@@ -29,10 +29,12 @@ export default function StationReviewsScreen() {
   const [newRating, setNewRating] = useState(0);
   const [showAddReview, setShowAddReview] = useState(false);
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [allReviews, setAllReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sentimentFilter, setSentimentFilter] = useState<'all' | 'positive' | 'negative' | 'neutral'>('all');
 
   // Fetch reviews from API
   const fetchReviews = useCallback(async () => {
@@ -47,16 +49,19 @@ export default function StationReviewsScreen() {
       const response = await apiService.getStationReviews(stationId);
       
       if (response.success && response.data) {
+        setAllReviews(response.data);
         setReviews(response.data);
       } else {
         console.error('Failed to fetch reviews:', response.error);
         // Fall back to mock data if API fails
+        setAllReviews(mockReviews);
         setReviews(mockReviews);
         setError(response.error || 'Failed to load reviews');
       }
     } catch (error) {
       console.error('Error fetching reviews:', error);
       // Fall back to mock data if API fails
+      setAllReviews(mockReviews);
       setReviews(mockReviews);
       setError('Failed to load reviews. Showing demo data.');
     } finally {
@@ -87,7 +92,8 @@ export default function StationReviewsScreen() {
       images: [],
       visitDate: new Date('2024-03-15'),
       createdAt: new Date('2024-03-15'),
-      isVerified: true
+      isVerified: true,
+      commentType: 'positive'
     },
     {
       id: '2',
@@ -98,7 +104,8 @@ export default function StationReviewsScreen() {
       images: [],
       visitDate: new Date('2024-03-10'),
       createdAt: new Date('2024-03-10'),
-      isVerified: true
+      isVerified: true,
+      commentType: 'positive'
     },
     {
       id: '3',
@@ -109,7 +116,8 @@ export default function StationReviewsScreen() {
       images: [],
       visitDate: new Date('2024-03-08'),
       createdAt: new Date('2024-03-08'),
-      isVerified: false
+      isVerified: false,
+      commentType: 'positive'
     },
     {
       id: '4',
@@ -120,11 +128,49 @@ export default function StationReviewsScreen() {
       images: [],
       visitDate: new Date('2024-03-05'),
       createdAt: new Date('2024-03-05'),
-      isVerified: true
+      isVerified: true,
+      commentType: 'neutral'
     }
   ];
 
-  const averageRating = reviews.length > 0 ? reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length : 0;
+  const averageRating = allReviews.length > 0 ? allReviews.reduce((sum, review) => sum + review.rating, 0) / allReviews.length : 0;
+
+  // Filter reviews by sentiment
+  const handleSentimentFilter = (filter: 'all' | 'positive' | 'negative' | 'neutral') => {
+    setSentimentFilter(filter);
+    if (filter === 'all') {
+      setReviews(allReviews);
+    } else {
+      const filtered = allReviews.filter(review => review.commentType === filter);
+      setReviews(filtered);
+    }
+  };
+
+  // Get sentiment counts
+  const sentimentCounts = {
+    all: allReviews.length,
+    positive: allReviews.filter(r => r.commentType === 'positive').length,
+    negative: allReviews.filter(r => r.commentType === 'negative').length,
+    neutral: allReviews.filter(r => r.commentType === 'neutral').length
+  };
+
+  const getSentimentColor = (sentiment: string) => {
+    switch (sentiment) {
+      case 'positive': return '#4CAF50';
+      case 'negative': return '#F44336';
+      case 'neutral': return '#FF9800';
+      default: return '#666';
+    }
+  };
+
+  const getSentimentIcon = (sentiment: string) => {
+    switch (sentiment) {
+      case 'positive': return 'happy-outline';
+      case 'negative': return 'sad-outline';
+      case 'neutral': return 'remove-circle-outline';
+      default: return 'ellipse-outline';
+    }
+  };
 
   const handleSubmitReview = async () => {
     if (!user) {
@@ -286,13 +332,86 @@ export default function StationReviewsScreen() {
               <View style={styles.summaryHeader}>
                 <View style={styles.averageRating}>
                   <Text style={styles.averageNumber}>
-                    {reviews.length > 0 ? averageRating.toFixed(1) : '0.0'}
+                    {allReviews.length > 0 ? averageRating.toFixed(1) : '0.0'}
                   </Text>
                   {renderStars(Math.round(averageRating), 20)}
-                  <Text style={styles.reviewCount}>{reviews.length} reviews</Text>
+                  <Text style={styles.reviewCount}>{allReviews.length} reviews</Text>
                 </View>
                 
                 {renderRatingDistribution()}
+              </View>
+            </View>
+
+            {/* Sentiment Filters */}
+            <View style={styles.sentimentFilters}>
+              <Text style={styles.filterTitle}>Filter by Sentiment</Text>
+              <View style={styles.filterButtons}>
+                <TouchableOpacity 
+                  style={[
+                    styles.filterButton, 
+                    sentimentFilter === 'all' && styles.filterButtonActive
+                  ]}
+                  onPress={() => handleSentimentFilter('all')}
+                >
+                  <Ionicons name="apps" size={16} color={sentimentFilter === 'all' ? '#007AFF' : '#666'} />
+                  <Text style={[
+                    styles.filterButtonText,
+                    sentimentFilter === 'all' && styles.filterButtonTextActive
+                  ]}>
+                    All ({sentimentCounts.all})
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={[
+                    styles.filterButton, 
+                    sentimentFilter === 'positive' && styles.filterButtonActive,
+                    sentimentFilter === 'positive' && styles.filterButtonPositive
+                  ]}
+                  onPress={() => handleSentimentFilter('positive')}
+                >
+                  <Ionicons name="happy-outline" size={16} color={sentimentFilter === 'positive' ? '#4CAF50' : '#666'} />
+                  <Text style={[
+                    styles.filterButtonText,
+                    sentimentFilter === 'positive' && styles.filterButtonTextPositive
+                  ]}>
+                    Positive ({sentimentCounts.positive})
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={[
+                    styles.filterButton, 
+                    sentimentFilter === 'negative' && styles.filterButtonActive,
+                    sentimentFilter === 'negative' && styles.filterButtonNegative
+                  ]}
+                  onPress={() => handleSentimentFilter('negative')}
+                >
+                  <Ionicons name="sad-outline" size={16} color={sentimentFilter === 'negative' ? '#F44336' : '#666'} />
+                  <Text style={[
+                    styles.filterButtonText,
+                    sentimentFilter === 'negative' && styles.filterButtonTextNegative
+                  ]}>
+                    Negative ({sentimentCounts.negative})
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity 
+                  style={[
+                    styles.filterButton, 
+                    sentimentFilter === 'neutral' && styles.filterButtonActive,
+                    sentimentFilter === 'neutral' && styles.filterButtonNeutral
+                  ]}
+                  onPress={() => handleSentimentFilter('neutral')}
+                >
+                  <Ionicons name="remove-circle-outline" size={16} color={sentimentFilter === 'neutral' ? '#FF9800' : '#666'} />
+                  <Text style={[
+                    styles.filterButtonText,
+                    sentimentFilter === 'neutral' && styles.filterButtonTextNeutral
+                  ]}>
+                    Neutral ({sentimentCounts.neutral})
+                  </Text>
+                </TouchableOpacity>
               </View>
             </View>
           </>
@@ -740,5 +859,74 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.5,
+  },
+  sentimentFilters: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    marginVertical: 16,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  filterTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 12,
+  },
+  filterButtons: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  filterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#F8F9FA',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  filterButtonActive: {
+    backgroundColor: '#E3F2FD',
+    borderColor: '#007AFF',
+  },
+  filterButtonPositive: {
+    backgroundColor: '#E8F5E9',
+    borderColor: '#4CAF50',
+  },
+  filterButtonNegative: {
+    backgroundColor: '#FFEBEE',
+    borderColor: '#F44336',
+  },
+  filterButtonNeutral: {
+    backgroundColor: '#FFF8E1',
+    borderColor: '#FF9800',
+  },
+  filterButtonText: {
+    fontSize: 13,
+    color: '#666',
+    fontWeight: '500',
+  },
+  filterButtonTextActive: {
+    color: '#007AFF',
+  },
+  filterButtonTextPositive: {
+    color: '#4CAF50',
+  },
+  filterButtonTextNegative: {
+    color: '#F44336',
+  },
+  filterButtonTextNeutral: {
+    color: '#FF9800',
   },
 });

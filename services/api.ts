@@ -355,6 +355,10 @@ class ApiService {
     return this.request(`/reviews/station/${stationId}`);
   }
 
+  async getStationSentimentStats(stationId: string): Promise<ApiResponse<any>> {
+    return this.request(`/reviews/sentiment/station/${stationId}`);
+  }
+
   async addReview(review: {
     stationId: string;
     rating: number;
