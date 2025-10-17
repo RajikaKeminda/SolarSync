@@ -130,8 +130,10 @@ export default function ExploreScreen() {
   const [showFilters, setShowFilters] = useState(false);
   const [loading, setLoading] = useState(true);
   const [stations, setStations] = useState<ChargingStation[]>([]);
+  const [allStations, setAllStations] = useState<ChargingStation[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [sentimentStats, setSentimentStats] = useState<{[key: string]: any}>({});
+  const [activeFilter, setActiveFilter] = useState<string | null>(null);
 
   // Fetch sentiment stats for a station
   const fetchSentimentStats = useCallback(async (stationId: string) => {
@@ -153,6 +155,7 @@ export default function ExploreScreen() {
     try {
       const response = await apiService.getAllStations();
       if (response.success && response.data) {
+        setAllStations(response.data);
         setStations(response.data);
         // Fetch sentiment stats for first 10 stations
         response.data.slice(0, 10).forEach((station: ChargingStation) => {
@@ -161,11 +164,13 @@ export default function ExploreScreen() {
       } else {
         console.error('Failed to fetch stations:', response.error);
         // Fall back to mock data if API fails
+        setAllStations(mockStations);
         setStations(mockStations);
       }
     } catch (error) {
       console.error('Error fetching stations:', error);
       // Fall back to mock data if API fails
+      setAllStations(mockStations);
       setStations(mockStations);
     } finally {
       setLoading(false);
@@ -176,13 +181,16 @@ export default function ExploreScreen() {
   const searchStations = useCallback(async (query: string) => {
     if (!query.trim()) {
       await fetchAllStations();
+      setActiveFilter(null); // Clear active filter when search is cleared
       return;
     }
 
+    setActiveFilter(null); // Clear active filter when searching
     setIsSearching(true);
     try {
       const response = await apiService.searchStations(query);
       if (response.success && response.data) {
+        setAllStations(response.data); // Update allStations too for filtering
         setStations(response.data);
       } else {
         console.error('Search failed:', response.error);
@@ -243,7 +251,15 @@ export default function ExploreScreen() {
   };
 
   const handleQuickFilter = (filterType: string) => {
-    let filteredStations = [...stations];
+    // If clicking the same filter, reset to show all
+    if (activeFilter === filterType) {
+      setActiveFilter(null);
+      setStations(allStations);
+      return;
+    }
+
+    setActiveFilter(filterType);
+    let filteredStations = [...allStations];
     
     switch (filterType) {
       case 'nearest':
@@ -256,7 +272,7 @@ export default function ExploreScreen() {
         break;
       case 'fast':
         // Filter for fast charging (>50kW)
-        filteredStations = stations.filter(station => 
+        filteredStations = allStations.filter(station => 
           station.portTypes.some(port => port.maxPower > 50)
         );
         break;
@@ -459,35 +475,71 @@ export default function ExploreScreen() {
       {/* Quick Actions */}
       <View style={styles.quickActions}>
         <TouchableOpacity 
-          style={styles.quickAction}
+          style={[styles.quickAction, activeFilter === 'nearest' && styles.quickActionActive]}
           onPress={() => handleQuickFilter('nearest')}
         >
-          <Ionicons name="location" size={20} color="#007AFF" />
-          <Text style={styles.quickActionText}>Nearest</Text>
+          <Ionicons 
+            name="location" 
+            size={20} 
+            color={activeFilter === 'nearest' ? '#fff' : '#007AFF'} 
+          />
+          <Text style={[
+            styles.quickActionText,
+            activeFilter === 'nearest' && styles.quickActionTextActive
+          ]}>
+            Nearest
+          </Text>
         </TouchableOpacity>
         
         <TouchableOpacity 
-          style={styles.quickAction}
+          style={[styles.quickAction, activeFilter === 'fast' && styles.quickActionActive]}
           onPress={() => handleQuickFilter('fast')}
         >
-          <Ionicons name="flash" size={20} color="#007AFF" />
-          <Text style={styles.quickActionText}>Fast Charge</Text>
+          <Ionicons 
+            name="flash" 
+            size={20} 
+            color={activeFilter === 'fast' ? '#fff' : '#007AFF'} 
+          />
+          <Text style={[
+            styles.quickActionText,
+            activeFilter === 'fast' && styles.quickActionTextActive
+          ]}>
+            Fast Charge
+          </Text>
         </TouchableOpacity>
         
         <TouchableOpacity 
-          style={styles.quickAction}
+          style={[styles.quickAction, activeFilter === 'cheapest' && styles.quickActionActive]}
           onPress={() => handleQuickFilter('cheapest')}
         >
-          <Ionicons name="pricetag" size={20} color="#007AFF" />
-          <Text style={styles.quickActionText}>Cheapest</Text>
+          <Ionicons 
+            name="pricetag" 
+            size={20} 
+            color={activeFilter === 'cheapest' ? '#fff' : '#007AFF'} 
+          />
+          <Text style={[
+            styles.quickActionText,
+            activeFilter === 'cheapest' && styles.quickActionTextActive
+          ]}>
+            Cheapest
+          </Text>
         </TouchableOpacity>
         
         <TouchableOpacity 
-          style={styles.quickAction}
+          style={[styles.quickAction, activeFilter === 'rated' && styles.quickActionActive]}
           onPress={() => handleQuickFilter('rated')}
         >
-          <Ionicons name="star" size={20} color="#007AFF" />
-          <Text style={styles.quickActionText}>Top Rated</Text>
+          <Ionicons 
+            name="star" 
+            size={20} 
+            color={activeFilter === 'rated' ? '#fff' : '#007AFF'} 
+          />
+          <Text style={[
+            styles.quickActionText,
+            activeFilter === 'rated' && styles.quickActionTextActive
+          ]}>
+            Top Rated
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -501,7 +553,10 @@ export default function ExploreScreen() {
       >
         <View style={styles.stationsHeader}>
           <Text style={styles.stationsCount}>
-            {loading ? 'Loading...' : `${stations.length} stations ${searchQuery ? 'found' : 'nearby'}`}
+            {loading ? 'Loading...' : 
+             activeFilter ? `${stations.length} ${activeFilter} stations` :
+             searchQuery ? `${stations.length} stations found` :
+             `${stations.length} stations nearby`}
           </Text>
           <TouchableOpacity>
             <Text style={styles.mapLink}>View on Map</Text>
@@ -633,11 +688,20 @@ const styles = StyleSheet.create({
   quickAction: {
     alignItems: 'center',
     gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+  },
+  quickActionActive: {
+    backgroundColor: '#007AFF',
   },
   quickActionText: {
     fontSize: 12,
     color: '#007AFF',
     fontWeight: '500',
+  },
+  quickActionTextActive: {
+    color: '#fff',
   },
   stationsList: {
     flex: 1,
