@@ -5,6 +5,7 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   ScrollView,
   StyleSheet,
   Switch,
@@ -13,6 +14,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 import { apiService } from '../../services/api';
 import { useAuthStore, useChargingStore, useVehicleStore } from '../../store';
@@ -37,10 +39,11 @@ export default function BookingScreen() {
   const [selectedPortType, setSelectedPortType] = useState<ChargingPortType>('CCS2');
   const [targetBatteryLevel, setTargetBatteryLevel] = useState(80);
   const [scheduledTime, setScheduledTime] = useState('now');
-  const [selectedDate] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedTimeSlot, setSelectedTimeSlot] = useState('09:00');
   const [addToCalendar, setAddToCalendar] = useState(true);
   const [sendReminder, setSendReminder] = useState(true);
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   // Fetch station details
   useEffect(() => {
@@ -92,6 +95,34 @@ export default function BookingScreen() {
 
   const batteryLevels = [50, 60, 70, 80, 90, 100];
 
+  const handleDateChange = (event: any, date?: Date) => {
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false);
+    }
+    
+    if (date) {
+      setSelectedDate(date);
+    }
+  };
+
+  const formatDate = (date: Date) => {
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    if (date.toDateString() === today.toDateString()) {
+      return 'Today';
+    } else if (date.toDateString() === tomorrow.toDateString()) {
+      return 'Tomorrow';
+    } else {
+      return date.toLocaleDateString('en-US', { 
+        month: 'short', 
+        day: 'numeric',
+        year: date.getFullYear() !== today.getFullYear() ? 'numeric' : undefined
+      });
+    }
+  };
+
   const handleBooking = async () => {
     if (!currentVehicle) {
       Alert.alert('Error', 'Please select a vehicle');
@@ -106,8 +137,7 @@ export default function BookingScreen() {
     try {
       setBookingLoading(true);
       
-      const scheduledStartTime = scheduledTime === 'now' ? new Date() : 
-        new Date(`${selectedDate.toDateString()} ${selectedTimeSlot}`);
+      const scheduledStartTime = scheduledTime === 'now' ? new Date() : new Date(selectedDate.setHours(parseInt(selectedTimeSlot.split(':')[0]), parseInt(selectedTimeSlot.split(':')[1]), 0, 0));
 
       const reservationData = {
         userId: user.id,
@@ -375,7 +405,51 @@ export default function BookingScreen() {
 
           {scheduledTime === 'later' && (
             <View style={styles.schedulingOptions}>
-              <Text style={styles.scheduleLabel}>Select Time Slot</Text>
+              {/* Date Selection */}
+              <Text style={styles.scheduleLabel}>Select Date</Text>
+              <TouchableOpacity 
+                style={styles.dateSelector}
+                onPress={() => setShowDatePicker(true)}
+              >
+                <Ionicons name="calendar-outline" size={20} color="#007AFF" />
+                <Text style={styles.dateSelectorText}>
+                  {formatDate(selectedDate)}
+                </Text>
+                <Text style={styles.dateSelectorDate}>
+                  {selectedDate.toLocaleDateString('en-US', { 
+                    weekday: 'long',
+                    month: 'long',
+                    day: 'numeric',
+                    year: 'numeric'
+                  })}
+                </Text>
+                <Ionicons name="chevron-down" size={20} color="#007AFF" />
+              </TouchableOpacity>
+
+              {/* Date Picker */}
+              {showDatePicker && (
+                <View style={styles.datePickerContainer}>
+                  <DateTimePicker
+                    value={selectedDate}
+                    mode="date"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={handleDateChange}
+                    minimumDate={new Date()}
+                    maximumDate={new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)} // 90 days from now
+                  />
+                  {Platform.OS === 'ios' && (
+                    <TouchableOpacity 
+                      style={styles.datePickerDoneButton}
+                      onPress={() => setShowDatePicker(false)}
+                    >
+                      <Text style={styles.datePickerDoneText}>Done</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+
+              {/* Time Slot Selection */}
+              <Text style={[styles.scheduleLabel, { marginTop: 16 }]}>Select Time Slot</Text>
               <ScrollView 
                 horizontal 
                 showsHorizontalScrollIndicator={false}
@@ -470,7 +544,7 @@ export default function BookingScreen() {
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Scheduled Time</Text>
                 <Text style={styles.summaryValue}>
-                  {selectedDate.toDateString()} at {selectedTimeSlot}
+                  {formatDate(selectedDate)} at {selectedTimeSlot}
                 </Text>
               </View>
             )}
@@ -697,6 +771,47 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333',
     marginBottom: 12,
+  },
+  dateSelector: {
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  dateSelectorText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#007AFF',
+  },
+  dateSelectorDate: {
+    flex: 1,
+    fontSize: 14,
+    color: '#666',
+  },
+  datePickerContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+  },
+  datePickerDoneButton: {
+    backgroundColor: '#007AFF',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  datePickerDoneText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   timeSlotScroll: {
     marginHorizontal: -16,

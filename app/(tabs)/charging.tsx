@@ -15,7 +15,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { apiService } from '../../services/api';
-import { useAuthStore, useChargingStore } from '../../store';
+import { useAuthStore, useChargingStore, useVehicleStore } from '../../store';
 import { ChargingSession, Reservation } from '../../types';
 import { formatDateTime, formatEnergy, formatPrice, formatTime } from '../../utils/helpers';
 
@@ -23,6 +23,7 @@ export default function ChargingScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user, token } = useAuthStore();
+  const { selectedVehicle, vehicles } = useVehicleStore();
   const { 
     activeSessions, 
     chargingHistory, 
@@ -31,7 +32,8 @@ export default function ChargingScreen() {
     setActiveSessions,
     setChargingHistory,
     addReservation,
-    cancelReservation
+    addChargingSession,
+    updateReservation
   } = useChargingStore();
   
   const [refreshing, setRefreshing] = useState(false);
@@ -135,6 +137,87 @@ export default function ChargingScreen() {
     );
   };
 
+  const handleStartCharging = async (reservation: Reservation) => {
+    if (!user) {
+      Alert.alert('Error', 'User information is missing');
+      return;
+    }
+
+    const currentVehicle = selectedVehicle || vehicles[0];
+    if (!currentVehicle) {
+      Alert.alert('Error', 'Please add a vehicle first');
+      return;
+    }
+
+    Alert.alert(
+      'Start Charging',
+      'Are you ready to start your charging session?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Start',
+          onPress: async () => {
+            try {
+              setLoading(true);
+
+              // Create charging session
+              const sessionResponse = await apiService.startChargingSession({
+                userId: user.id,
+                stationId: reservation.stationId,
+                vehicleId: reservation.vehicleId,
+                startTime: new Date(),
+                energyDelivered: 0,
+                cost: 0,
+                status: 'active',
+                reservationId: reservation.id
+              });
+
+              if (sessionResponse.success && sessionResponse.data) {
+                // Add session to local store
+                addChargingSession(sessionResponse.data);
+                setActiveSessions([sessionResponse.data]);
+
+                // Update reservation status to completed
+                const updateResponse = await apiService.updateReservation(reservation.id, { 
+                  status: 'completed' 
+                });
+
+                if (updateResponse.success) {
+                  // Update local store to mark reservation as completed
+                  updateReservation(reservation.id, { status: 'completed' });
+                  
+                  Alert.alert(
+                    'Charging Started!',
+                    'Your charging session has been started successfully.',
+                    [
+                      {
+                        text: 'View Session',
+                        onPress: () => sessionResponse.data && router.push(`/charging/session?sessionId=${sessionResponse.data.id}`)
+                      },
+                      { text: 'OK' }
+                    ]
+                  );
+
+                  // Refresh the data to update the UI
+                  await fetchChargingData();
+                } else {
+                  Alert.alert('Warning', 'Charging started but failed to update reservation status');
+                }
+              } else {
+                Alert.alert('Error', sessionResponse.error || 'Failed to start charging session');
+              }
+            } catch (error) {
+              console.error('Error starting charging:', error);
+              Alert.alert('Error', 'Failed to start charging session');
+            } finally {
+              setLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const handleCancelReservation = async (reservationId: string) => {
     Alert.alert(
       'Cancel Reservation',
@@ -146,12 +229,15 @@ export default function ChargingScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              const response = await apiService.cancelReservation(reservationId);
+              const response = await apiService.updateReservation(reservationId, { status: 'cancelled' });
               
               if (response.success) {
                 // Update local store
-                cancelReservation(reservationId);
+                updateReservation(reservationId, { status: 'cancelled' });
                 Alert.alert('Reservation Cancelled', 'Your reservation has been cancelled.');
+                
+                // Refresh the data
+                await fetchChargingData();
               } else {
                 Alert.alert('Error', response.error || 'Failed to cancel reservation');
               }
@@ -299,10 +385,11 @@ export default function ChargingScreen() {
       {reservation.status === 'confirmed' && (
         <View style={styles.reservationActions}>
           <TouchableOpacity 
-            style={styles.modifyButton}
-            onPress={() => router.push('/station/book')}
+            style={styles.startButton}
+            onPress={() => handleStartCharging(reservation)}
           >
-            <Text style={styles.modifyButtonText}>Modify</Text>
+            <Ionicons name="flash" size={16} color="#fff" />
+            <Text style={styles.startButtonText}>Start Charging</Text>
           </TouchableOpacity>
           
           <TouchableOpacity 
@@ -412,8 +499,8 @@ export default function ChargingScreen() {
 
             {activeTab === 'reservations' && (
               <View style={styles.tabContent}>
-                {upcomingReservations.length > 0 ? (
-                  upcomingReservations.map(renderReservation)
+                {upcomingReservations.filter(res => res.status === 'confirmed').length > 0 ? (
+                  [...new Map(upcomingReservations.filter(res => res.status === 'confirmed').map(res => [res.id, res])).values()].map(renderReservation)
                 ) : (
                   <View style={styles.emptyState}>
                     <Ionicons name="calendar-outline" size={64} color="#ccc" />
@@ -691,19 +778,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
   },
-  modifyButton: {
+  startButton: {
     flex: 1,
-    backgroundColor: '#F0F8FF',
+    backgroundColor: '#4CAF50',
     paddingVertical: 10,
     borderRadius: 6,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#007AFF',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6,
   },
-  modifyButtonText: {
-    color: '#007AFF',
+  startButtonText: {
+    color: '#fff',
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   cancelButton: {
     flex: 1,
