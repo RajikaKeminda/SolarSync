@@ -32,6 +32,7 @@ export default function BusinessAnalyticsScreen() {
   const [stationPerformanceData, setStationPerformanceData] = useState<any>(null);
   const [peakHoursData, setPeakHoursData] = useState<any>(null);
   const [customerInsightsData, setCustomerInsightsData] = useState<any>(null);
+  const [aiSuggestions, setAiSuggestions] = useState<any[]>([]);
 
   const fetchAnalyticsData = useCallback(async () => {
     if (!user?.id) {
@@ -41,12 +42,13 @@ export default function BusinessAnalyticsScreen() {
 
     setLoading(true);
     try {
-      const [metricsResponse, revenueResponse, stationResponse, peakHoursResponse, customerResponse] = await Promise.all([
+      const [metricsResponse, revenueResponse, stationResponse, peakHoursResponse, customerResponse, aiResponse] = await Promise.all([
         apiService.getBusinessMetrics(user.id, selectedPeriod),
         apiService.getRevenueTrends(user.id, selectedPeriod),
         apiService.getStationPerformance(user.id, selectedPeriod),
         apiService.getPeakHoursAnalysis(user.id, selectedPeriod),
-        apiService.getCustomerInsights(user.id, selectedPeriod)
+        apiService.getCustomerInsights(user.id, selectedPeriod),
+        apiService.getAISuggestions(user.id, selectedPeriod)
       ]);
 
       if (metricsResponse.success) setMetricsData(metricsResponse.data);
@@ -54,6 +56,7 @@ export default function BusinessAnalyticsScreen() {
       if (stationResponse.success) setStationPerformanceData(stationResponse.data);
       if (peakHoursResponse.success) setPeakHoursData(peakHoursResponse.data);
       if (customerResponse.success) setCustomerInsightsData(customerResponse.data);
+      if (aiResponse.success && aiResponse.data) setAiSuggestions(aiResponse.data.suggestions || []);
     } catch (error) {
       console.error('Error fetching analytics data:', error);
       // Continue with mock data on error
@@ -158,6 +161,47 @@ export default function BusinessAnalyticsScreen() {
     ]
   };
 
+  // Helper functions for AI suggestions
+  const getCategoryColor = (category: string) => {
+    switch (category) {
+      case 'revenue': return '#4CAF50';
+      case 'efficiency': return '#FF9800';
+      case 'customer': return '#2196F3';
+      case 'expansion': return '#9C27B0';
+      case 'optimization': return '#00BCD4';
+      default: return '#666';
+    }
+  };
+
+  const getCategoryIcon = (category: string): any => {
+    switch (category) {
+      case 'revenue': return 'wallet';
+      case 'efficiency': return 'speedometer';
+      case 'customer': return 'people';
+      case 'expansion': return 'business';
+      case 'optimization': return 'settings';
+      default: return 'bulb';
+    }
+  };
+
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'high': return '#F44336';
+      case 'medium': return '#FF9800';
+      case 'low': return '#4CAF50';
+      default: return '#666';
+    }
+  };
+
+  const getImpactColor = (impact: string) => {
+    switch (impact) {
+      case 'high': return '#4CAF50';
+      case 'medium': return '#FF9800';
+      case 'low': return '#FFC107';
+      default: return '#666';
+    }
+  };
+
   const PeriodButton = ({ period, title }: { period: typeof selectedPeriod, title: string }) => (
     <TouchableOpacity
       style={[
@@ -244,6 +288,70 @@ export default function BusinessAnalyticsScreen() {
         }
         showsVerticalScrollIndicator={false}
       >
+        {/* AI Business Suggestions */}
+        {aiSuggestions.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.aiHeader}>
+              <Ionicons name="sparkles" size={20} color="#007AFF" />
+              <Text style={styles.sectionTitle}>AI-Powered Insights</Text>
+            </View>
+            
+            <View style={styles.aiSuggestionsContainer}>
+              {aiSuggestions.map((suggestion, index) => (
+                <View key={suggestion.id || index} style={styles.suggestionCard}>
+                  <View style={styles.suggestionHeader}>
+                    <View style={[
+                      styles.categoryBadge,
+                      { backgroundColor: getCategoryColor(suggestion.category) + '20' }
+                    ]}>
+                      <Ionicons 
+                        name={getCategoryIcon(suggestion.category)} 
+                        size={16} 
+                        color={getCategoryColor(suggestion.category)} 
+                      />
+                      <Text style={[
+                        styles.categoryText,
+                        { color: getCategoryColor(suggestion.category) }
+                      ]}>
+                        {suggestion.category}
+                      </Text>
+                    </View>
+                    
+                    <View style={[
+                      styles.priorityBadge,
+                      { backgroundColor: getPriorityColor(suggestion.priority) + '20' }
+                    ]}>
+                      <Text style={[
+                        styles.priorityText,
+                        { color: getPriorityColor(suggestion.priority) }
+                      ]}>
+                        {suggestion.priority}
+                      </Text>
+                    </View>
+                  </View>
+                  
+                  <Text style={styles.suggestionTitle}>{suggestion.title}</Text>
+                  <Text style={styles.suggestionDescription}>{suggestion.description}</Text>
+                  
+                  <View style={styles.impactContainer}>
+                    <Ionicons 
+                      name="trending-up" 
+                      size={14} 
+                      color={getImpactColor(suggestion.impact)} 
+                    />
+                    <Text style={[
+                      styles.impactText,
+                      { color: getImpactColor(suggestion.impact) }
+                    ]}>
+                      {suggestion.impact} impact
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
         {/* Key Metrics */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
@@ -830,5 +938,80 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 4,
     textAlign: 'center',
+  },
+  aiHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  aiSuggestionsContainer: {
+    gap: 12,
+  },
+  suggestionCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
+    borderLeftWidth: 4,
+    borderLeftColor: '#007AFF',
+  },
+  suggestionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  categoryBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  categoryText: {
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'capitalize',
+  },
+  priorityBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  priorityText: {
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  suggestionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  suggestionDescription: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  impactContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  impactText: {
+    fontSize: 12,
+    fontWeight: '500',
+    textTransform: 'capitalize',
   },
 });

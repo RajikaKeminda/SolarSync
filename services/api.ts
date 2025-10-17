@@ -453,6 +453,13 @@ class ApiService {
     return this.request(`/analytics/business/customer-insights?${params}`);
   }
 
+  async getAISuggestions(ownerId: string, period?: string): Promise<ApiResponse<any>> {
+    const params = new URLSearchParams();
+    params.append('ownerId', ownerId);
+    if (period) params.append('period', period);
+    return this.request(`/analytics/ai-suggestions?${params}`);
+  }
+
   // AI APIs
   async getAITripSuggestions(data: {
     tripDescription: string;
