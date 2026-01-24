@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Dimensions,
   RefreshControl,
@@ -13,8 +13,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { apiService } from '../../services/api';
 import { useAuthStore, useChargingStore, useVehicleStore } from '../../store';
-import { Reservation } from '../../types';
+import { ChargingSession, Reservation } from '../../types';
 import { calculateEstimatedRange, formatTime, getBatteryColor } from '../../utils/helpers';
 
 const { width } = Dimensions.get('window');
@@ -23,16 +24,71 @@ export default function HomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuthStore();
-  const { vehicles, selectedVehicle } = useVehicleStore();
-  const { activeSessions, upcomingReservations } = useChargingStore();
+  const { vehicles, selectedVehicle, setVehicles } = useVehicleStore();
+  const { setActiveSessions } = useChargingStore();
   
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [activeSession, setActiveSession] = useState<ChargingSession | null>(null);
+  const [upcomingReservations, setLocalUpcomingReservations] = useState<Reservation[]>([]);
 
-  const onRefresh = React.useCallback(() => {
+  // Fetch all data from APIs
+  const fetchData = useCallback(async () => {
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      // Fetch vehicles
+      const vehiclesResponse = await apiService.getVehicles();
+      if (vehiclesResponse.success && vehiclesResponse.data) {
+        setVehicles(vehiclesResponse.data);
+      }
+
+      // Fetch active charging session
+      const activeSessionResponse = await apiService.getActiveSession();
+      if (activeSessionResponse.success && activeSessionResponse.data) {
+        setActiveSession(activeSessionResponse.data);
+        setActiveSessions([activeSessionResponse.data]);
+      } else {
+        setActiveSession(null);
+        setActiveSessions([]);
+      }
+
+      // Fetch user reservations
+      const reservationsResponse = await apiService.getReservationsByUserId(user.id);
+      if (reservationsResponse.success && reservationsResponse.data) {
+        const confirmedReservations = reservationsResponse.data.filter(
+          (r: Reservation) => r.status === 'confirmed' && new Date(r.scheduledStartTime) > new Date()
+        );
+        setLocalUpcomingReservations(confirmedReservations);
+      }
+
+    } catch (error) {
+      console.error('Error fetching home screen data:', error);
+    } finally {
+      setLoading(false);
+    }
+    }, [user?.id, setVehicles, setActiveSessions]);
+
+  // Load data on mount
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // Refresh data when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchData();
+    }, [fetchData])
+  );
+
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    // TODO: Refresh data from API
-    setTimeout(() => setRefreshing(false), 2000);
-  }, []);
+    await fetchData();
+    setRefreshing(false);
+  }, [fetchData]);
 
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -42,10 +98,8 @@ export default function HomeScreen() {
   };
 
   const currentVehicle = selectedVehicle || vehicles[0];
-  const activeSession = activeSessions[0];
   const nextReservation = upcomingReservations
-    .filter((r: Reservation) => r.status === 'confirmed')
-    .sort((a: Reservation, b: Reservation) => a.scheduledStartTime.getTime() - b.scheduledStartTime.getTime())[0];
+    .sort((a: Reservation, b: Reservation) => new Date(a.scheduledStartTime).getTime() - new Date(b.scheduledStartTime).getTime())[0];
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -75,6 +129,12 @@ export default function HomeScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
+        {/* Loading State */}
+        {loading && (
+          <View style={styles.loadingContainer}>
+            <Text style={styles.loadingText}>Loading your dashboard...</Text>
+          </View>
+        )}
         {/* Current Vehicle Card */}
         {currentVehicle ? (
           <View style={styles.vehicleCard}>
@@ -85,7 +145,7 @@ export default function HomeScreen() {
                   {currentVehicle.make} {currentVehicle.model}
                 </Text>
               </View>
-              <TouchableOpacity onPress={() => router.push('/vehicle/edit')}>
+              <TouchableOpacity onPress={() => router.push('/profile')}>
                 <Ionicons name="settings-outline" size={20} color="#666" />
               </TouchableOpacity>
             </View>
@@ -144,21 +204,25 @@ export default function HomeScreen() {
               <Text style={styles.cardTitle}>Active Charging</Text>
               <View style={styles.statusBadge}>
                 <View style={styles.statusDot} />
-                <Text style={styles.statusText}>Charging</Text>
+                <Text style={styles.statusText}>
+                  {activeSession.status === 'active' ? 'Charging' : 'Connected'}
+                </Text>
               </View>
             </View>
             
-            <Text style={styles.stationName}>Station Name Here</Text>
+            <Text style={styles.stationName}>
+              Charging Station
+            </Text>
             <Text style={styles.chargingTime}>
-              Started at {formatTime(activeSession.startTime)}
+              Started at {formatTime(new Date(activeSession.startTime))}
             </Text>
             
             <View style={styles.chargingProgress}>
               <Text style={styles.energyDelivered}>
-                {activeSession.energyDelivered.toFixed(1)} kWh delivered
+                {(activeSession.energyDelivered || 0).toFixed(1)} kWh delivered
               </Text>
               <Text style={styles.chargingCost}>
-                ${activeSession.cost.toFixed(2)}
+                ${(activeSession.cost || 0).toFixed(2)}
               </Text>
             </View>
             
@@ -180,15 +244,24 @@ export default function HomeScreen() {
             </View>
             
             <Text style={styles.reservationTime}>
-              {formatTime(nextReservation.scheduledStartTime)}
+              {formatTime(new Date(nextReservation.scheduledStartTime))}
             </Text>
             <Text style={styles.reservationDate}>
-              {nextReservation.scheduledStartTime.toDateString()}
+              {new Date(nextReservation.scheduledStartTime).toDateString()}
             </Text>
+            
+            <View style={styles.reservationDetails}>
+              <Text style={styles.reservationStation}>
+                Charging Station
+              </Text>
+              <Text style={styles.reservationDuration}>
+                Duration: {nextReservation.estimatedDuration} minutes
+              </Text>
+            </View>
             
             <TouchableOpacity 
               style={styles.viewReservationButton}
-              onPress={() => router.push('/station/details')}
+              onPress={() => router.push(`/station/details?id=${nextReservation.stationId}`)}
             >
               <Text style={styles.viewReservationButtonText}>View Details</Text>
             </TouchableOpacity>
@@ -588,5 +661,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     lineHeight: 16,
+  },
+  loadingContainer: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#666',
+  },
+  reservationDetails: {
+    marginVertical: 8,
+  },
+  reservationStation: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#333',
+    marginBottom: 4,
+  },
+  reservationDuration: {
+    fontSize: 14,
+    color: '#666',
   },
 });

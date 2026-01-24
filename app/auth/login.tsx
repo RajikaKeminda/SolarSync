@@ -1,18 +1,19 @@
+import { useSignIn } from '@clerk/clerk-expo';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
 import {
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { apiService } from '../../services/api';
 import { useAuthStore } from '../../store';
@@ -21,7 +22,7 @@ import { isValidEmail } from '../../utils/helpers';
 export default function LoginScreen() {
   const router = useRouter();
   const { setAuth, setLoading, isLoading } = useAuthStore();
-  
+  const { signIn, setActive } = useSignIn()
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -40,12 +41,20 @@ export default function LoginScreen() {
     setLoading(true);
 
     try {
+      if (!signIn) {
+        Alert.alert('Error', 'Failed to login');
+        return;
+      }
+
+      const { createdSessionId } = await signIn.create({ identifier: email, password })
+      await setActive({ session: createdSessionId })
+
       const response = await apiService.login(email, password);
       
       if (response.success && response.data) {
-        const { user, token } = response.data;
-        apiService.setToken(token);
-        setAuth(user, token);
+        const user: any = response.data;
+        apiService.setToken(createdSessionId || '');
+        setAuth(user, createdSessionId || '');
       } else {
         Alert.alert('Login Failed', response.error || 'Invalid credentials');
       }

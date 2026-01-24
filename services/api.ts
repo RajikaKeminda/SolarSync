@@ -1,18 +1,18 @@
 import {
-    AITripSuggestion,
-    Analytics,
-    ChargingSession,
-    ChargingStation,
-    Location,
-    Reservation,
-    Review,
-    TripPlan,
-    User,
-    Vehicle
+  AITripSuggestion,
+  Analytics,
+  ChargingSession,
+  ChargingStation,
+  Location,
+  Reservation,
+  Review,
+  TripPlan,
+  User,
+  Vehicle
 } from '../types';
 
 // Base API configuration
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://wealthy-doberman-newly.ngrok-free.app';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -81,9 +81,8 @@ class ApiService {
 
   // Authentication APIs
   async login(email: string, password: string): Promise<ApiResponse<{ user: User; token: string }>> {
-    return this.request('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
+    return this.request(`/users/email/${email}`, {
+      method: 'GET',
     });
   }
 
@@ -96,9 +95,9 @@ class ApiService {
     phoneNumber?: string;
     businessName?: string;
   }): Promise<ApiResponse<{ user: User; token: string }>> {
-    return this.request('/auth/register', {
+    return this.request('/users', {
       method: 'POST',
-      body: JSON.stringify(userData),
+      body: JSON.stringify({...userData, phone: userData.phoneNumber}),
     });
   }
 
@@ -181,23 +180,21 @@ class ApiService {
     return this.request(`/stations/nearby?${params}`);
   }
 
+  async getStationsByOwnerId(ownerId: string): Promise<ApiResponse<ChargingStation[]>> {
+    return this.request(`/stations/owner/${ownerId}`);
+  }
+
   async getStationById(id: string): Promise<ApiResponse<ChargingStation>> {
     return this.request(`/stations/${id}`);
   }
 
-  async searchStations(query: {
-    search?: string;
-    location?: Location;
-    portTypes?: string[];
-    amenities?: string[];
-    maxDistance?: number;
-    priceRange?: { min: number; max: number };
-    rating?: number;
-  }): Promise<ApiResponse<ChargingStation[]>> {
-    return this.request('/stations/search', {
-      method: 'POST',
-      body: JSON.stringify(query),
-    });
+
+  async getAllStations(): Promise<ApiResponse<ChargingStation[]>> {
+    return this.request('/stations');
+  }
+
+  async searchStations(query: string): Promise<ApiResponse<ChargingStation[]>> {
+    return this.request(`/stations/search?q=${query}`);
   }
 
   async addStation(station: Omit<ChargingStation, 'id' | 'ownerId' | 'createdAt' | 'updatedAt'>): Promise<ApiResponse<ChargingStation>> {
@@ -255,6 +252,14 @@ class ApiService {
     return this.request('/reservations');
   }
 
+  async getReservationsByUserId(userId: string): Promise<ApiResponse<Reservation[]>> {
+    return this.request(`/reservations/user/${userId}`);
+  }
+
+  async getReservationsByStationId(stationId: string): Promise<ApiResponse<Reservation[]>> {
+    return this.request(`/reservations/station/${stationId}`);
+  }
+
   async createReservation(data: {
     stationId: string;
     vehicleId: string;
@@ -283,7 +288,7 @@ class ApiService {
 
   // Review APIs
   async getStationReviews(stationId: string): Promise<ApiResponse<Review[]>> {
-    return this.request(`/stations/${stationId}/reviews`);
+    return this.request(`/reviews/station/${stationId}`);
   }
 
   async addReview(review: {

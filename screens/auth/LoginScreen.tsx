@@ -1,3 +1,4 @@
+import { useSignIn } from '@clerk/clerk-expo';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -18,6 +19,7 @@ import { useAuthStore } from '../../store';
 import { isValidEmail } from '../../utils/helpers';
 
 export default function LoginScreen() {
+  const { signIn, setActive } = useSignIn()
   const router = useRouter();
   const setAuth = useAuthStore((state) => state.setAuth);
   
@@ -40,12 +42,20 @@ export default function LoginScreen() {
     setIsLoading(true);
 
     try {
+      if (!signIn) {
+        Alert.alert('Error', 'Failed to login');
+        return;
+      }
+
+      const { createdSessionId } = await signIn.create({ identifier: email, password })
+      await setActive({ session: createdSessionId })
+
       const response = await apiService.login(email, password);
       
       if (response.success && response.data) {
-        const { user, token } = response.data;
-        apiService.setToken(token);
-        setAuth(user, token);
+        const user: any = response.data;
+        apiService.setToken(createdSessionId || '');
+        setAuth(user, createdSessionId || '');
         
         // Navigate based on user type
         if (user.userType === 'ev_owner') {
